@@ -1,3 +1,4 @@
+
 export interface Doctor {
   id: string;
   name: string;
@@ -10,6 +11,15 @@ export interface AppointmentRequest {
   preferredTime: string;
   doctorId: string;
   isOnline: boolean;
-  userEmail?: string; 
+  userEmail?: string;
   createdAt: Date;
+}
+
+// New User type for authentication
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  password?: string; // Password stored for testing - NOT FOR PRODUCTION
+  imageUrl?: string;
 }

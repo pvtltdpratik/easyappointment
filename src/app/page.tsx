@@ -1,8 +1,43 @@
+
+"use client"; 
 import { AppointmentForm } from "@/components/appointment-form";
 import { AuthButton } from "@/components/auth-button";
-import { Separator } from "@/components/ui/separator";
+import { useState, useEffect } from 'react';
+import type { User } from "@/lib/types";
 
 export default function HomePage() {
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const storedUser = localStorage.getItem('easyAppointmentUser');
+    if (storedUser) {
+      try {
+        setUser(JSON.parse(storedUser));
+      } catch (e) {
+        // Handle error or clear invalid item
+        localStorage.removeItem('easyAppointmentUser');
+      }
+    }
+    setIsLoading(false);
+     // Listen for storage changes to update UI if user logs in/out in another tab
+    const handleStorageChange = () => {
+        const updatedStoredUser = localStorage.getItem('easyAppointmentUser');
+        if (updatedStoredUser) {
+            try { setUser(JSON.parse(updatedStoredUser)); } catch(e) { setUser(null); }
+        } else {
+            setUser(null);
+        }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('authChange', handleStorageChange); // For immediate updates
+
+    return () => {
+        window.removeEventListener('storage', handleStorageChange);
+        window.removeEventListener('authChange', handleStorageChange);
+    };
+  }, []);
+
   return (
     <div className="flex flex-col min-h-screen bg-background">
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -22,9 +57,17 @@ export default function HomePage() {
 
       <main className="flex-grow container mx-auto px-4 py-8 md:py-12 flex flex-col items-center">
         <div className="w-full max-w-4xl text-center mb-10">
-          <h2 className="text-3xl md:text-4xl font-headline font-semibold text-foreground mb-3">
-            Hassle-Free Scheduling is Here
-          </h2>
+          {isLoading ? (
+            <div className="h-10 bg-muted animate-pulse rounded w-3/4 mx-auto mb-3"></div>
+          ) : user ? (
+            <h2 className="text-3xl md:text-4xl font-headline font-semibold text-foreground mb-3">
+              Welcome back, {user.name}!
+            </h2>
+          ) : (
+            <h2 className="text-3xl md:text-4xl font-headline font-semibold text-foreground mb-3">
+              Hassle-Free Scheduling is Here
+            </h2>
+          )}
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
             Quickly book your appointments with our expert doctors. Your health, simplified.
           </p>
