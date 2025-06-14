@@ -4,23 +4,25 @@
 import type { z } from "zod";
 import type { AppointmentRequest, User } from "./types";
 import { appointmentSchema, loginSchema, registrationSchema } from "./schemas";
+import { db } from "./firebase"; // Import Firestore instance
+import { collection, addDoc, Timestamp } from "firebase/firestore"; // Import Firestore functions
 
 export type AppointmentFormState = {
   message?: string | null;
   errors?: {
     name?: string[];
-    contactNumber?: string[]; // Added contact number errors
+    contactNumber?: string[];
     preferredDate?: string[];
     preferredTime?: string[];
     doctorId?: string[];
     isOnline?: string[];
     _form?: string[]; 
   };
-  appointment?: AppointmentRequest | null;
+  appointment?: AppointmentRequest | null; // This will hold the client-side structure of the appointment
   success?: boolean;
 }
 
-// IMPORTANT: This is a mock in-memory database for testing purposes only.
+// IMPORTANT: This is a mock in-memory database for testing purposes only for auth.
 // Data will be lost on server restart. DO NOT USE IN PRODUCTION.
 // Storing plain text passwords is a major security risk.
 let mockPatientsDB: User[] = [];
@@ -54,7 +56,6 @@ export async function registerUserAction(
 
   const { name, email, contactNumber, password } = validatedFields.data;
 
-  // Simulate checking if user already exists
   if (mockPatientsDB.some(user => user.email === email)) {
     return {
       errors: { email: ["User with this email already exists."] },
@@ -64,17 +65,16 @@ export async function registerUserAction(
   }
 
   const newUser: User = {
-    id: Date.now().toString(), // simple unique ID
+    id: Date.now().toString(), 
     name,
     email,
-    contactNumber: contactNumber || undefined, // Store if provided
-    password, // Storing password for testing - NOT SECURE
+    contactNumber: contactNumber || undefined, 
+    password, 
   };
 
   mockPatientsDB.push(newUser);
   console.log("Mock DB after registration:", mockPatientsDB);
 
-  // Don't return the password to the client, even if it's for a mock session
   const { password: _, ...userWithoutPassword } = newUser;
 
   return {
@@ -98,19 +98,9 @@ export async function loginUserAction(
   }
 
   const { email, password } = validatedFields.data;
-
   const user = mockPatientsDB.find(u => u.email === email);
 
-  if (!user) {
-    return {
-      errors: { _form: ["Invalid email or password."] },
-      message: "Login failed.",
-      success: false,
-    };
-  }
-
-  // Simulate password check (NOT SECURE)
-  if (user.password !== password) {
+  if (!user || user.password !== password) {
     return {
       errors: { _form: ["Invalid email or password."] },
       message: "Login failed.",
@@ -119,8 +109,6 @@ export async function loginUserAction(
   }
   
   console.log("Mock DB user found for login:", user);
-
-  // Don't return the password to the client
   const { password: _, ...userWithoutPassword } = user;
 
   return {
@@ -144,31 +132,42 @@ export async function createAppointmentAction(
     };
   }
 
-  const appointmentData = validatedFields.data;
+  const appointmentInputData = validatedFields.data;
   
-  const newAppointment: AppointmentRequest = {
-    ...appointmentData, // Includes name, contactNumber (if provided), preferredDate, etc.
-    createdAt: new Date(),
+  // Data to be saved to Firestore, converting dates to Timestamps
+  const appointmentToSave = {
+    ...appointmentInputData,
+    preferredDate: Timestamp.fromDate(appointmentInputData.preferredDate),
+    createdAt: Timestamp.now(),
   };
 
   try {
-    console.log("Simulating saving appointment:", newAppointment);
-    await new Promise(resolve => setTimeout(resolve, 1000)); 
+    const docRef = await addDoc(collection(db, "appointments"), appointmentToSave);
+    console.log("Appointment saved to Firestore with ID: ", docRef.id);
+
+    // For the return value to the client, we use the original JS Date objects
+    // from the input, as that's what the AppointmentRequest type expects
+    // and what the client-side form might have been working with.
+    const newAppointmentForClient: AppointmentRequest = {
+      ...appointmentInputData, // name, contactNumber, doctorId, isOnline, preferredTime
+      preferredDate: appointmentInputData.preferredDate, // original JS Date
+      createdAt: new Date(), // current JS Date for client representation
+    };
 
     return { 
-      message: "Appointment created successfully!", 
-      appointment: newAppointment,
+      message: "Appointment created successfully and saved to Firestore!", 
+      appointment: newAppointmentForClient,
       success: true,
     };
   } catch (error) {
-    console.error("Failed to create appointment:", error);
-    let errorMessage = "Database Error: Failed to create appointment.";
-    if (error instanceof Error) {
-        errorMessage = error.message;
+    console.error("Failed to create appointment in Firestore:", error);
+    let errorMessage = "Database Error: Failed to save appointment to Firestore.";
+    if (error instanceof Error && error.message) {
+        errorMessage = `Failed to save to Firestore: ${error.message}`;
     }
     return { 
         message: errorMessage,
-        errors: { _form: ["An unexpected error occurred while saving the appointment."] },
+        errors: { _form: ["An unexpected error occurred while saving the appointment to Firestore."] },
         success: false,
     };
   }
