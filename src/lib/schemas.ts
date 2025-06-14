@@ -15,6 +15,7 @@ export const appointmentSchema = z.object({
 export const registrationSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }).max(100),
   email: z.string().email({ message: "Invalid email address." }),
+  contactNumber: z.string().min(10, {message: "Contact number must be at least 10 digits."}).optional().or(z.literal('')), // Optional, allows empty string
   password: z.string().min(6, { message: "Password must be at least 6 characters." }),
   confirmPassword: z.string().min(6, { message: "Password must be at least 6 characters." }),
 }).refine((data) => data.password === data.confirmPassword, {

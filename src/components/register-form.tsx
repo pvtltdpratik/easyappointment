@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import type { z } from "zod";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { User, Lock, Mail, Building } from "lucide-react"; // Using Building for name as a generic icon
+import { User, Lock, Mail, Phone } from "lucide-react"; 
 
 import { Button } from "@/components/ui/button";
 import {
@@ -23,7 +23,6 @@ import { registrationSchema } from "@/lib/schemas";
 import { registerUserAction, type AuthFormState } from "@/lib/actions";
 import { useToast } from "@/hooks/use-toast";
 import React, { useState, useTransition } from "react";
-import type { User as UserType } from "@/lib/types";
 
 export function RegisterForm() {
   const router = useRouter();
@@ -36,6 +35,7 @@ export function RegisterForm() {
     defaultValues: {
       name: "",
       email: "",
+      contactNumber: "",
       password: "",
       confirmPassword: "",
     },
@@ -50,8 +50,6 @@ export function RegisterForm() {
           title: "Registration Successful!",
           description: result.message || "You can now log in.",
         });
-        // Optionally auto-login by setting user in localStorage and redirecting
-        // For now, just redirect to login page
         router.push("/login");
       } else {
         if (result.errors) {
@@ -109,6 +107,19 @@ export function RegisterForm() {
                   <FormLabel className="flex items-center"><Mail className="mr-2 h-4 w-4 text-accent" />Email Address</FormLabel>
                   <FormControl>
                     <Input type="email" placeholder="e.g. john.doe@example.com" {...field} aria-label="Email Address" />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="contactNumber"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="flex items-center"><Phone className="mr-2 h-4 w-4 text-accent" />Contact Number (Optional)</FormLabel>
+                  <FormControl>
+                    <Input type="tel" placeholder="e.g. 1234567890" {...field} aria-label="Contact Number" />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

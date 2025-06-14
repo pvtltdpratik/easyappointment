@@ -29,6 +29,7 @@ export type AuthFormState = {
   errors?: {
     name?: string[];
     email?: string[];
+    contactNumber?: string[];
     password?: string[];
     confirmPassword?: string[];
     _form?: string[];
@@ -50,7 +51,7 @@ export async function registerUserAction(
     };
   }
 
-  const { name, email, password } = validatedFields.data;
+  const { name, email, contactNumber, password } = validatedFields.data;
 
   // Simulate checking if user already exists
   if (mockPatientsDB.some(user => user.email === email)) {
@@ -65,6 +66,7 @@ export async function registerUserAction(
     id: Date.now().toString(), // simple unique ID
     name,
     email,
+    contactNumber: contactNumber || undefined, // Store if provided
     password, // Storing password for testing - NOT SECURE
   };
 

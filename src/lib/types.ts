@@ -20,6 +20,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  contactNumber?: string; // Added contact number
   password?: string; // Password stored for testing - NOT FOR PRODUCTION
   imageUrl?: string;
 }
