@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import type { z } from "zod";
 import { format } from "date-fns";
-import { CalendarIcon, Clock, User, Briefcase, Wifi, Phone } from "lucide-react"; // Added Phone
+import { CalendarIcon, Clock, User, Briefcase, Wifi, Phone, AlertCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -33,19 +33,13 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
-import type { Doctor, User as UserType } from "@/lib/types"; // Added UserType
+import type { Doctor, User as UserType } from "@/lib/types";
 import { appointmentSchema } from "@/lib/schemas";
-import { createAppointmentAction, type AppointmentFormState } from "@/lib/actions";
+import { createAppointmentAction, getDoctorsAction, type AppointmentFormState, type GetDoctorsState } from "@/lib/actions";
 import { useToast } from "@/hooks/use-toast";
-import React, { useState, useTransition, useEffect } from "react"; // Added useEffect
-
-const doctors: Doctor[] = [
-  { id: "doc1", name: "Dr. Olivia Bennett", specialty: "Cardiology" },
-  { id: "doc2", name: "Dr. Ethan Hayes", specialty: "Pediatrics" },
-  { id: "doc3", name: "Dr. Sophia Castillo", specialty: "Dermatology" },
-  { id: "doc4", name: "Dr. Liam Patel", specialty: "Neurology" },
-];
+import React, { useState, useTransition, useEffect } from "react";
 
 const timeSlots = Array.from({ length: 17 }, (_, i) => {
   const hour = 9 + Math.floor(i / 2);
@@ -53,19 +47,22 @@ const timeSlots = Array.from({ length: 17 }, (_, i) => {
   const period = hour < 12 ? "AM" : "PM";
   const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
   return `${String(displayHour).padStart(2, '0')}:${minute} ${period}`;
-}); // Generates time slots from 09:00 AM to 05:00 PM in 30-min intervals
-
+});
 
 export function AppointmentForm() {
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
   const [formError, setFormError] = useState<string | null>(null);
 
+  const [doctorsList, setDoctorsList] = useState<Doctor[]>([]);
+  const [isLoadingDoctors, setIsLoadingDoctors] = useState(true);
+  const [doctorsError, setDoctorsError] = useState<string | null>(null);
+
   const form = useForm<z.infer<typeof appointmentSchema>>({
     resolver: zodResolver(appointmentSchema),
     defaultValues: {
       name: "",
-      contactNumber: "", // Added contactNumber
+      contactNumber: "",
       preferredDate: undefined,
       preferredTime: "",
       doctorId: "",
@@ -73,14 +70,33 @@ export function AppointmentForm() {
     },
   });
 
-  // Effect to pre-fill form data from logged-in user
   useEffect(() => {
+    // Fetch doctors
+    const fetchDoctors = async () => {
+      setIsLoadingDoctors(true);
+      setDoctorsError(null);
+      const result: GetDoctorsState = await getDoctorsAction();
+      if (result.success && result.doctors) {
+        setDoctorsList(result.doctors);
+      } else {
+        setDoctorsError(result.error || "Failed to load doctors.");
+        toast({
+          title: "Error Loading Doctors",
+          description: result.error || "Could not fetch the list of doctors. Please try again later.",
+          variant: "destructive",
+        });
+      }
+      setIsLoadingDoctors(false);
+    };
+    fetchDoctors();
+
+    // Pre-fill form data from logged-in user
     const storedUser = localStorage.getItem('easyAppointmentUser');
     if (storedUser) {
       try {
         const user: UserType = JSON.parse(storedUser);
         form.reset({
-          ...form.getValues(), // Preserve other values if they were somehow set
+          ...form.getValues(),
           name: user.name || "",
           contactNumber: user.contactNumber || "",
         });
@@ -89,7 +105,7 @@ export function AppointmentForm() {
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run once on mount
+  }, []);
 
 
   function onSubmit(values: z.infer<typeof appointmentSchema>) {
@@ -101,7 +117,6 @@ export function AppointmentForm() {
           title: "Success!",
           description: result.message || "Your appointment has been scheduled.",
         });
-        // Reset form, but if user is still logged in, pre-fill name and contact again
         const storedUser = localStorage.getItem('easyAppointmentUser');
         let defaultName = "";
         let defaultContact = "";
@@ -122,7 +137,6 @@ export function AppointmentForm() {
         });
 
       } else {
-        // Display field errors if any
         if (result.errors) {
             Object.entries(result.errors).forEach(([field, messages]) => {
                 if (messages && messages.length > 0) {
@@ -137,7 +151,6 @@ export function AppointmentForm() {
                 }
             });
         }
-        // Display general form error or overall message
         const generalErrorMessage = result.errors?._form?.join(', ') || result.message || "Failed to schedule appointment. Please try again.";
         setFormError(generalErrorMessage);
         toast({
@@ -218,7 +231,7 @@ export function AppointmentForm() {
                           selected={field.value}
                           onSelect={field.onChange}
                           disabled={(date) =>
-                            date < new Date(new Date().setHours(0,0,0,0)) // Disable past dates
+                            date < new Date(new Date().setHours(0,0,0,0))
                           }
                           initialFocus
                         />
@@ -261,20 +274,37 @@ export function AppointmentForm() {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel className="flex items-center"><Briefcase className="mr-2 h-4 w-4 text-accent" />Select Doctor</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value} aria-label="Select Doctor">
+                  <Select onValueChange={field.onChange} defaultValue={field.value} aria-label="Select Doctor" disabled={isLoadingDoctors || doctorsList.length === 0}>
                     <FormControl>
                       <SelectTrigger>
-                        <SelectValue placeholder="Choose your preferred doctor" />
+                        <SelectValue placeholder={isLoadingDoctors ? "Loading doctors..." : (doctorsList.length === 0 && !doctorsError) ? "No doctors available" : "Choose your preferred doctor"} />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {doctors.map((doctor) => (
-                        <SelectItem key={doctor.id} value={doctor.id}>
-                          {doctor.name} - <span className="text-sm text-muted-foreground">{doctor.specialty}</span>
+                      {isLoadingDoctors ? (
+                        <SelectItem value="loading" disabled>Loading...</SelectItem>
+                      ) : doctorsList.length > 0 ? (
+                        doctorsList.map((doctor) => (
+                          <SelectItem key={doctor.id} value={doctor.id}>
+                            {doctor.name}
+                            {doctor.specialty && <span className="text-sm text-muted-foreground"> - {doctor.specialty}</span>}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="no-doctors" disabled>
+                          {doctorsError ? "Error loading doctors" : "No doctors available"}
                         </SelectItem>
-                      ))}
+                      )}
                     </SelectContent>
                   </Select>
+                  {doctorsError && !isLoadingDoctors && (
+                     <Alert variant="destructive" className="mt-2">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertDescription>
+                           {doctorsError}
+                        </AlertDescription>
+                    </Alert>
+                  )}
                   <FormMessage />
                 </FormItem>
               )}
@@ -304,12 +334,12 @@ export function AppointmentForm() {
                 </FormItem>
               )}
             />
-            
+
             {formError && (
                 <p className="text-sm font-medium text-destructive">{formError}</p>
             )}
 
-            <Button type="submit" className="w-full md:w-auto" disabled={isPending}>
+            <Button type="submit" className="w-full md:w-auto" disabled={isPending || isLoadingDoctors}>
               {isPending ? "Scheduling..." : "Schedule Appointment"}
             </Button>
           </form>

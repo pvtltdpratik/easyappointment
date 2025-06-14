@@ -1,8 +1,8 @@
 
 export interface Doctor {
-  id: string;
+  id: string; // Firestore document ID
   name: string;
-  specialty: string;
+  specialty?: string; // Specialty is now optional
 }
 
 export interface AppointmentRequest {
@@ -11,7 +11,7 @@ export interface AppointmentRequest {
   preferredTime: string;
   doctorId: string;
   isOnline: boolean;
-  contactNumber?: string; // Added contact number
+  contactNumber?: string;
   userEmail?: string;
   createdAt: Date;
 }
@@ -21,7 +21,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  contactNumber?: string; // Added contact number
+  contactNumber?: string;
   password?: string; // Password stored for testing - NOT FOR PRODUCTION
   imageUrl?: string;
 }

@@ -2,10 +2,10 @@
 "use server";
 
 import type { z } from "zod";
-import type { AppointmentRequest, User } from "./types";
+import type { AppointmentRequest, User, Doctor } from "./types"; // Added Doctor type
 import { appointmentSchema, loginSchema, registrationSchema } from "./schemas";
-import { db } from "./firebase"; // Import Firestore instance
-import { collection, addDoc, Timestamp } from "firebase/firestore"; // Import Firestore functions
+import { db } from "./firebase";
+import { collection, addDoc, Timestamp, getDocs } from "firebase/firestore"; // Import Firestore functions
 
 export type AppointmentFormState = {
   message?: string | null;
@@ -16,9 +16,9 @@ export type AppointmentFormState = {
     preferredTime?: string[];
     doctorId?: string[];
     isOnline?: string[];
-    _form?: string[]; 
+    _form?: string[];
   };
-  appointment?: AppointmentRequest | null; // This will hold the client-side structure of the appointment
+  appointment?: AppointmentRequest | null;
   success?: boolean;
 }
 
@@ -65,11 +65,11 @@ export async function registerUserAction(
   }
 
   const newUser: User = {
-    id: Date.now().toString(), 
+    id: Date.now().toString(),
     name,
     email,
-    contactNumber: contactNumber || undefined, 
-    password, 
+    contactNumber: contactNumber || undefined,
+    password,
   };
 
   mockPatientsDB.push(newUser);
@@ -107,7 +107,7 @@ export async function loginUserAction(
       success: false,
     };
   }
-  
+
   console.log("Mock DB user found for login:", user);
   const { password: _, ...userWithoutPassword } = user;
 
@@ -133,8 +133,7 @@ export async function createAppointmentAction(
   }
 
   const appointmentInputData = validatedFields.data;
-  
-  // Data to be saved to Firestore, converting dates to Timestamps
+
   const appointmentToSave = {
     ...appointmentInputData,
     preferredDate: Timestamp.fromDate(appointmentInputData.preferredDate),
@@ -145,17 +144,14 @@ export async function createAppointmentAction(
     const docRef = await addDoc(collection(db, "appointments"), appointmentToSave);
     console.log("Appointment saved to Firestore with ID: ", docRef.id);
 
-    // For the return value to the client, we use the original JS Date objects
-    // from the input, as that's what the AppointmentRequest type expects
-    // and what the client-side form might have been working with.
     const newAppointmentForClient: AppointmentRequest = {
-      ...appointmentInputData, // name, contactNumber, doctorId, isOnline, preferredTime
-      preferredDate: appointmentInputData.preferredDate, // original JS Date
-      createdAt: new Date(), // current JS Date for client representation
+      ...appointmentInputData,
+      preferredDate: appointmentInputData.preferredDate,
+      createdAt: new Date(),
     };
 
-    return { 
-      message: "Appointment created successfully and saved to Firestore!", 
+    return {
+      message: "Appointment created successfully and saved to Firestore!",
       appointment: newAppointmentForClient,
       success: true,
     };
@@ -165,10 +161,44 @@ export async function createAppointmentAction(
     if (error instanceof Error && error.message) {
         errorMessage = `Failed to save to Firestore: ${error.message}`;
     }
-    return { 
+    return {
         message: errorMessage,
         errors: { _form: ["An unexpected error occurred while saving the appointment to Firestore."] },
         success: false,
     };
+  }
+}
+
+export type GetDoctorsState = {
+  doctors?: Doctor[];
+  error?: string | null;
+  success: boolean;
+};
+
+export async function getDoctorsAction(): Promise<GetDoctorsState> {
+  try {
+    const doctorsCollection = collection(db, "doctors");
+    const doctorSnapshot = await getDocs(doctorsCollection);
+    const doctorsList: Doctor[] = doctorSnapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id, // Use Firestore document ID
+        name: data.name || "Unnamed Doctor", // From Firestore 'name' field
+        specialty: data.specialty || undefined, // From Firestore 'specialty' field, if it exists
+      };
+    });
+
+    if (doctorsList.length === 0) {
+      console.warn("No doctors found in Firestore 'doctors' collection.");
+    }
+
+    return { doctors: doctorsList, success: true };
+  } catch (error) {
+    console.error("Error fetching doctors from Firestore:", error);
+    let errorMessage = "Database Error: Failed to fetch doctors.";
+    if (error instanceof Error && error.message) {
+        errorMessage = `Failed to fetch doctors: ${error.message}`;
+    }
+    return { error: errorMessage, success: false };
   }
 }
