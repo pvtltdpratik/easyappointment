@@ -3,6 +3,7 @@ import { z } from "zod";
 
 export const appointmentSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters." }).max(100, { message: "Name must be 100 characters or less."}),
+  contactNumber: z.string().min(10, {message: "Contact number must be at least 10 digits."}).optional().or(z.literal('')), // Optional, allows empty string
   preferredDate: z.date({
     required_error: "A date for the appointment is required.",
     invalid_type_error: "That's not a valid date!",

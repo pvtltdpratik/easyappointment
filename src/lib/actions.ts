@@ -9,6 +9,7 @@ export type AppointmentFormState = {
   message?: string | null;
   errors?: {
     name?: string[];
+    contactNumber?: string[]; // Added contact number errors
     preferredDate?: string[];
     preferredTime?: string[];
     doctorId?: string[];
@@ -146,7 +147,7 @@ export async function createAppointmentAction(
   const appointmentData = validatedFields.data;
   
   const newAppointment: AppointmentRequest = {
-    ...appointmentData,
+    ...appointmentData, // Includes name, contactNumber (if provided), preferredDate, etc.
     createdAt: new Date(),
   };
 

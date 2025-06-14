@@ -11,6 +11,7 @@ export interface AppointmentRequest {
   preferredTime: string;
   doctorId: string;
   isOnline: boolean;
+  contactNumber?: string; // Added contact number
   userEmail?: string;
   createdAt: Date;
 }

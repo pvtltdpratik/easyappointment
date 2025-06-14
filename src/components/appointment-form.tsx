@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import type { z } from "zod";
 import { format } from "date-fns";
-import { CalendarIcon, Clock, User, Briefcase, Wifi } from "lucide-react";
+import { CalendarIcon, Clock, User, Briefcase, Wifi, Phone } from "lucide-react"; // Added Phone
 
 import { Button } from "@/components/ui/button";
 import {
@@ -34,11 +34,11 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import type { Doctor } from "@/lib/types";
+import type { Doctor, User as UserType } from "@/lib/types"; // Added UserType
 import { appointmentSchema } from "@/lib/schemas";
 import { createAppointmentAction, type AppointmentFormState } from "@/lib/actions";
 import { useToast } from "@/hooks/use-toast";
-import React, { useState, useTransition } from "react";
+import React, { useState, useTransition, useEffect } from "react"; // Added useEffect
 
 const doctors: Doctor[] = [
   { id: "doc1", name: "Dr. Olivia Bennett", specialty: "Cardiology" },
@@ -65,12 +65,32 @@ export function AppointmentForm() {
     resolver: zodResolver(appointmentSchema),
     defaultValues: {
       name: "",
+      contactNumber: "", // Added contactNumber
       preferredDate: undefined,
       preferredTime: "",
       doctorId: "",
       isOnline: false,
     },
   });
+
+  // Effect to pre-fill form data from logged-in user
+  useEffect(() => {
+    const storedUser = localStorage.getItem('easyAppointmentUser');
+    if (storedUser) {
+      try {
+        const user: UserType = JSON.parse(storedUser);
+        form.reset({
+          ...form.getValues(), // Preserve other values if they were somehow set
+          name: user.name || "",
+          contactNumber: user.contactNumber || "",
+        });
+      } catch (e) {
+        console.error("Failed to parse user for pre-filling appointment form:", e);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount
+
 
   function onSubmit(values: z.infer<typeof appointmentSchema>) {
     setFormError(null);
@@ -81,7 +101,26 @@ export function AppointmentForm() {
           title: "Success!",
           description: result.message || "Your appointment has been scheduled.",
         });
-        form.reset();
+        // Reset form, but if user is still logged in, pre-fill name and contact again
+        const storedUser = localStorage.getItem('easyAppointmentUser');
+        let defaultName = "";
+        let defaultContact = "";
+        if (storedUser) {
+            try {
+                const user: UserType = JSON.parse(storedUser);
+                defaultName = user.name || "";
+                defaultContact = user.contactNumber || "";
+            } catch (e) { /* ignore */ }
+        }
+        form.reset({
+            name: defaultName,
+            contactNumber: defaultContact,
+            preferredDate: undefined,
+            preferredTime: "",
+            doctorId: "",
+            isOnline: false,
+        });
+
       } else {
         // Display field errors if any
         if (result.errors) {
@@ -127,6 +166,20 @@ export function AppointmentForm() {
                   <FormLabel className="flex items-center"><User className="mr-2 h-4 w-4 text-accent" />Full Name</FormLabel>
                   <FormControl>
                     <Input placeholder="e.g. John Doe" {...field} aria-label="Full Name" />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="contactNumber"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="flex items-center"><Phone className="mr-2 h-4 w-4 text-accent" />Contact Number (Optional)</FormLabel>
+                  <FormControl>
+                    <Input type="tel" placeholder="e.g. 1234567890" {...field} aria-label="Contact Number" />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
