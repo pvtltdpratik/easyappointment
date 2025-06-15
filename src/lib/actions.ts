@@ -2,10 +2,10 @@
 "use server";
 
 import type { z } from "zod";
-import type { AppointmentRequest, User, Doctor } from "./types"; // Added Doctor type
+import type { AppointmentRequest, User, Doctor } from "./types";
 import { appointmentSchema, loginSchema, registrationSchema } from "./schemas";
 import { db } from "./firebase";
-import { collection, addDoc, Timestamp, getDocs } from "firebase/firestore"; // Import Firestore functions
+import { collection, addDoc, Timestamp, getDocs } from "firebase/firestore";
 
 export type AppointmentFormState = {
   message?: string | null;
@@ -132,22 +132,54 @@ export async function createAppointmentAction(
     };
   }
 
-  const appointmentInputData = validatedFields.data;
+  const { name, contactNumber, preferredDate, preferredTime, doctorId, isOnline } = validatedFields.data;
+
+  // Combine preferredDate and preferredTime into a single appointmentDateTime
+  const [time, period] = preferredTime.split(' ');
+  const [hoursStr, minutesStr] = time.split(':');
+  let hours = parseInt(hoursStr, 10);
+  const minutes = parseInt(minutesStr, 10);
+
+  if (period.toUpperCase() === 'PM' && hours < 12) {
+    hours += 12;
+  } else if (period.toUpperCase() === 'AM' && hours === 12) { // Handle 12 AM (midnight)
+    hours = 0;
+  }
+
+  const appointmentDateTimeJS = new Date(preferredDate);
+  appointmentDateTimeJS.setHours(hours, minutes, 0, 0); // Set hours, minutes, seconds, ms
+
+  const now = Timestamp.now();
 
   const appointmentToSave = {
-    ...appointmentInputData,
-    preferredDate: Timestamp.fromDate(appointmentInputData.preferredDate),
-    createdAt: Timestamp.now(),
+    name,
+    contactNumber: contactNumber || null, // Store as null if empty, or omit if truly optional
+    appointmentDateTime: Timestamp.fromDate(appointmentDateTimeJS),
+    preferredTime, // Store the original string time as well, as per DB image
+    doctorId,
+    isOnline,
+    status: "Scheduled", // Default status
+    createdAt: now,
+    updatedAt: now,
+    // userEmail: data.userEmail or similar if you add it to schema/logic
   };
 
   try {
     const docRef = await addDoc(collection(db, "appointments"), appointmentToSave);
     console.log("Appointment saved to Firestore with ID: ", docRef.id);
 
+    // Prepare data for client, converting Timestamps back to JS Dates
     const newAppointmentForClient: AppointmentRequest = {
-      ...appointmentInputData,
-      preferredDate: appointmentInputData.preferredDate,
-      createdAt: new Date(),
+      name: appointmentToSave.name,
+      appointmentDateTime: appointmentDateTimeJS,
+      preferredTime: appointmentToSave.preferredTime,
+      doctorId: appointmentToSave.doctorId,
+      isOnline: appointmentToSave.isOnline,
+      contactNumber: appointmentToSave.contactNumber || undefined,
+      status: appointmentToSave.status,
+      createdAt: now.toDate(),
+      updatedAt: now.toDate(),
+      // userEmail: if applicable
     };
 
     return {

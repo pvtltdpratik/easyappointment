@@ -7,13 +7,16 @@ export interface Doctor {
 
 export interface AppointmentRequest {
   name: string;
-  preferredDate: Date;
-  preferredTime: string;
+  // preferredDate: Date; // This is now combined into appointmentDateTime
+  appointmentDateTime: Date; // Combined date and time for client-side use
+  preferredTime: string; // The string time slot selected, e.g., "02:30 PM"
   doctorId: string;
   isOnline: boolean;
   contactNumber?: string;
-  userEmail?: string;
+  userEmail?: string; // Retained if used elsewhere, not in current DB image
+  status: string;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 // New User type for authentication
