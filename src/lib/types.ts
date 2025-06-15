@@ -7,19 +7,18 @@ export interface Doctor {
 
 export interface AppointmentRequest {
   name: string;
-  // preferredDate: Date; // This is now combined into appointmentDateTime
   appointmentDateTime: Date; // Combined date and time for client-side use
   preferredTime: string; // The string time slot selected, e.g., "02:30 PM"
   doctorId: string;
   isOnline: boolean;
   contactNumber?: string;
-  userEmail?: string; // Retained if used elsewhere, not in current DB image
+  userEmail?: string;
   status: string;
   createdAt: Date;
   updatedAt: Date;
 }
 
-// New User type for authentication
+// User type for authentication
 export interface User {
   id: string;
   name: string;
@@ -27,4 +26,5 @@ export interface User {
   contactNumber?: string;
   password?: string; // Password stored for testing - NOT FOR PRODUCTION
   imageUrl?: string;
+  createdAt?: Date; // Added for Firestore record
 }

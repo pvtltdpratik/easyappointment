@@ -5,7 +5,7 @@ import type { z } from "zod";
 import type { AppointmentRequest, User, Doctor } from "./types";
 import { appointmentSchema, loginSchema, registrationSchema } from "./schemas";
 import { db } from "./firebase";
-import { collection, addDoc, Timestamp, getDocs } from "firebase/firestore";
+import { collection, addDoc, query, where, getDocs, Timestamp, doc, setDoc } from "firebase/firestore";
 
 export type AppointmentFormState = {
   message?: string | null;
@@ -21,11 +21,6 @@ export type AppointmentFormState = {
   appointment?: AppointmentRequest | null;
   success?: boolean;
 }
-
-// IMPORTANT: This is a mock in-memory database for testing purposes only for auth.
-// Data will be lost on server restart. DO NOT USE IN PRODUCTION.
-// Storing plain text passwords is a major security risk.
-let mockPatientsDB: User[] = [];
 
 export type AuthFormState = {
   message?: string | null;
@@ -56,32 +51,62 @@ export async function registerUserAction(
 
   const { name, email, contactNumber, password } = validatedFields.data;
 
-  if (mockPatientsDB.some(user => user.email === email)) {
+  try {
+    const patientsCollection = collection(db, "patients");
+    const q = query(patientsCollection, where("email", "==", email));
+    const querySnapshot = await getDocs(q);
+
+    if (!querySnapshot.empty) {
+      return {
+        errors: { email: ["User with this email already exists."] },
+        message: "Registration failed.",
+        success: false,
+      };
+    }
+
+    // Create a new document with an auto-generated ID
+    const newUserRef = doc(collection(db, "patients"));
+    const newUserId = newUserRef.id;
+    
+    const newUser: User = {
+      id: newUserId, // Use Firestore generated ID
+      name,
+      email,
+      contactNumber: contactNumber || undefined,
+      password, // Storing plain text password for testing
+      createdAt: new Date(), // Will be converted to Timestamp by Firestore
+    };
+
+    // Firestore handles Date to Timestamp conversion automatically
+    const patientDataToSave = {
+        name: newUser.name,
+        email: newUser.email,
+        contactNumber: newUser.contactNumber || null,
+        password: newUser.password, // Storing plain text password
+        createdAt: Timestamp.fromDate(newUser.createdAt!),
+    };
+    
+    await setDoc(newUserRef, patientDataToSave);
+
+    const { password: _, ...userWithoutPassword } = newUser;
+
     return {
-      errors: { email: ["User with this email already exists."] },
-      message: "Registration failed.",
+      message: "Registration successful! You can now log in.",
+      user: userWithoutPassword,
+      success: true,
+    };
+  } catch (error) {
+    console.error("Firestore registration error:", error);
+    let errorMessage = "Database Error: Failed to register user.";
+    if (error instanceof Error && error.message) {
+        errorMessage = `Failed to register: ${error.message}`;
+    }
+    return {
+      message: errorMessage,
+      errors: { _form: ["An unexpected error occurred during registration."] },
       success: false,
     };
   }
-
-  const newUser: User = {
-    id: Date.now().toString(),
-    name,
-    email,
-    contactNumber: contactNumber || undefined,
-    password,
-  };
-
-  mockPatientsDB.push(newUser);
-  console.log("Mock DB after registration:", mockPatientsDB);
-
-  const { password: _, ...userWithoutPassword } = newUser;
-
-  return {
-    message: "Registration successful! You can now log in.",
-    user: userWithoutPassword,
-    success: true,
-  };
 }
 
 export async function loginUserAction(
@@ -97,25 +122,60 @@ export async function loginUserAction(
     };
   }
 
-  const { email, password } = validatedFields.data;
-  const user = mockPatientsDB.find(u => u.email === email);
+  const { email, password: inputPassword } = validatedFields.data;
 
-  if (!user || user.password !== password) {
+  try {
+    const patientsCollection = collection(db, "patients");
+    const q = query(patientsCollection, where("email", "==", email));
+    const querySnapshot = await getDocs(q);
+
+    if (querySnapshot.empty) {
+      return {
+        errors: { _form: ["Invalid email or password."] },
+        message: "Login failed.",
+        success: false,
+      };
+    }
+
+    const userDoc = querySnapshot.docs[0];
+    const userData = userDoc.data();
+
+    if (userData.password !== inputPassword) { // Comparing plain text passwords
+      return {
+        errors: { _form: ["Invalid email or password."] },
+        message: "Login failed.",
+        success: false,
+      };
+    }
+
+    const user: User = {
+      id: userDoc.id,
+      name: userData.name,
+      email: userData.email,
+      contactNumber: userData.contactNumber || undefined,
+      // Do not include password in the object returned to client
+      imageUrl: userData.imageUrl || undefined, // Assuming imageUrl might exist
+      createdAt: userData.createdAt ? (userData.createdAt as Timestamp).toDate() : undefined,
+    };
+    
     return {
-      errors: { _form: ["Invalid email or password."] },
-      message: "Login failed.",
+      message: "Login successful!",
+      user: user, // User object without password
+      success: true,
+    };
+
+  } catch (error) {
+    console.error("Firestore login error:", error);
+    let errorMessage = "Database Error: Failed to log in.";
+     if (error instanceof Error && error.message) {
+        errorMessage = `Failed to log in: ${error.message}`;
+    }
+    return {
+      message: errorMessage,
+      errors: { _form: ["An unexpected error occurred during login."] },
       success: false,
     };
   }
-
-  console.log("Mock DB user found for login:", user);
-  const { password: _, ...userWithoutPassword } = user;
-
-  return {
-    message: "Login successful!",
-    user: userWithoutPassword,
-    success: true,
-  };
 }
 
 
@@ -153,22 +213,20 @@ export async function createAppointmentAction(
 
   const appointmentToSave = {
     name,
-    contactNumber: contactNumber || null, // Store as null if empty, or omit if truly optional
+    contactNumber: contactNumber || null,
     appointmentDateTime: Timestamp.fromDate(appointmentDateTimeJS),
-    preferredTime, // Store the original string time as well, as per DB image
+    preferredTime, // Store the original string time as well
     doctorId,
     isOnline,
     status: "Scheduled", // Default status
     createdAt: now,
     updatedAt: now,
-    // userEmail: data.userEmail or similar if you add it to schema/logic
   };
 
   try {
     const docRef = await addDoc(collection(db, "appointments"), appointmentToSave);
     console.log("Appointment saved to Firestore with ID: ", docRef.id);
 
-    // Prepare data for client, converting Timestamps back to JS Dates
     const newAppointmentForClient: AppointmentRequest = {
       name: appointmentToSave.name,
       appointmentDateTime: appointmentDateTimeJS,
@@ -179,7 +237,6 @@ export async function createAppointmentAction(
       status: appointmentToSave.status,
       createdAt: now.toDate(),
       updatedAt: now.toDate(),
-      // userEmail: if applicable
     };
 
     return {
@@ -214,9 +271,9 @@ export async function getDoctorsAction(): Promise<GetDoctorsState> {
     const doctorsList: Doctor[] = doctorSnapshot.docs.map(doc => {
       const data = doc.data();
       return {
-        id: doc.id, // Use Firestore document ID
-        name: data.name || "Unnamed Doctor", // From Firestore 'name' field
-        specialty: data.specialty || undefined, // From Firestore 'specialty' field, if it exists
+        id: doc.id,
+        name: data.name || "Unnamed Doctor",
+        specialty: data.specialty || undefined,
       };
     });
 
