@@ -10,27 +10,6 @@ import Razorpay from "razorpay";
 
 const CONSULTATION_FEE_PAISE = 50000; // 500.00 INR, used for online consultations
 
-// Helper to generate standard time slots (9 AM - 5 PM, 30-min intervals)
-const generateStandardTimeSlots = () => {
-  const slots = [];
-  // 9:00 AM to 4:30 PM (inclusive start times for 30-min slots, last slot starts 4:30 PM, ends 5:00 PM)
-  // This means 16 slots (9:00, 9:30 ... 16:00, 16:30)
-  for (let i = 0; i < 16; i++) { 
-    const hour = 9 + Math.floor(i / 2);
-    const minute = i % 2 === 0 ? "00" : "30";
-    const period = hour < 12 || hour === 24 ? "AM" : "PM"; // hour 24 would be 12 AM next day, not applicable here
-    let displayHour = hour;
-    if (hour > 12) displayHour = hour - 12;
-    if (hour === 0) displayHour = 12; // Should not happen with 9-16 range
-    if (hour === 12) displayHour = 12; // Noon is 12 PM
-    
-    slots.push(`${String(displayHour).padStart(2, '0')}:${minute} ${period}`);
-  }
-  return slots;
-};
-const allPossibleTimeSlots = generateStandardTimeSlots();
-
-
 export type AppointmentFormState = {
   message?: string | null;
   errors?: {
@@ -53,9 +32,6 @@ export type AppointmentFormState = {
   };
   appointment?: AppointmentRequest | null;
   success?: boolean;
-  slotAvailable?: boolean;
-  suggestions?: string[];
-  suggestionMessage?: string;
 }
 
 export type AuthFormState = {
@@ -238,7 +214,6 @@ export async function createAppointmentAction(
 
   const { name, contactNumber, preferredDate, preferredTime, doctorId, isOnline, paymentId, orderId, signature } = validatedFields.data;
 
-  // 1. Construct and validate the selected date and time
   const [timeStr, period] = preferredTime.split(' ');
   const [hoursStr, minutesStr] = timeStr.split(':');
   let hours = parseInt(hoursStr, 10);
@@ -246,99 +221,16 @@ export async function createAppointmentAction(
 
   if (period.toUpperCase() === 'PM' && hours < 12) {
     hours += 12;
-  } else if (period.toUpperCase() === 'AM' && hours === 12) { // 12 AM is midnight
+  } else if (period.toUpperCase() === 'AM' && hours === 12) { 
     hours = 0;
   }
-
-  // Robust construction of appointmentDateTimeJS:
-  // preferredDate is a JS Date object from the client, representing their local midnight for the selected day.
-  // Its getTime() gives a UTC timestamp. We add the selected hours and minutes to this UTC timestamp.
+  
   const appointmentTimestamp = preferredDate.getTime() + 
                                (hours * 60 * 60 * 1000) + 
                                (minutes * 60 * 1000);
   const appointmentDateTimeJS = new Date(appointmentTimestamp);
   
-  const nowServer = new Date(); 
-
-  if (appointmentDateTimeJS < nowServer) {
-    return {
-      message: "Cannot book appointments in the past. Please select a future date or time.",
-      success: false,
-      slotAvailable: false,
-    };
-  }
-  
-  // 2. Checks time slot availability
-  const appointmentsCollectionRef = collection(db, "appointments");
-  
-  // Create a date range for the entire preferredDate (client's local day)
-  // For Firestore query, we need UTC start and end of that client's local day.
-  const clientDayStart = new Date(preferredDate); // This is client's local midnight.
-  clientDayStart.setHours(0,0,0,0); // Ensure it's exactly midnight client local time
-
-  const clientDayEnd = new Date(preferredDate);
-  clientDayEnd.setHours(23,59,59,999); // End of client's local day
-
-  const q = query(
-    appointmentsCollectionRef,
-    where("doctorId", "==", doctorId),
-    where("appointmentDateTime", ">=", Timestamp.fromDate(clientDayStart)),
-    where("appointmentDateTime", "<=", Timestamp.fromDate(clientDayEnd)),
-    where("status", "in", ["Scheduled", "Paid & Scheduled"]) 
-  );
-
   try {
-    const querySnapshot = await getDocs(q);
-    const bookedTimesOnDay = querySnapshot.docs.map(doc => doc.data().preferredTime as string);
-
-    if (bookedTimesOnDay.includes(preferredTime)) {
-      // 3. Suggests alternatives if the slot is taken
-      const availableSlotsToday: string[] = [];
-      const preferredTimeIndex = allPossibleTimeSlots.indexOf(preferredTime); 
-
-      for (let i = 0; i < allPossibleTimeSlots.length; i++) {
-        const slot = allPossibleTimeSlots[i];
-        if (bookedTimesOnDay.includes(slot)) continue; 
-
-        const slotParts = slot.split(' ');
-        const slotTimeParts = slotParts[0].split(':');
-        let slotHours = parseInt(slotTimeParts[0], 10);
-        const slotMinutes = parseInt(slotTimeParts[1], 10);
-        if (slotParts[1].toUpperCase() === 'PM' && slotHours < 12) slotHours += 12;
-        if (slotParts[1].toUpperCase() === 'AM' && slotHours === 12) slotHours = 0; 
-        
-        const slotTimestamp = preferredDate.getTime() +
-                              (slotHours * 60 * 60 * 1000) +
-                              (slotMinutes * 60 * 1000);
-        const slotDateTime = new Date(slotTimestamp);
-        
-        if (slotDateTime > nowServer) { 
-            if (i > preferredTimeIndex && availableSlotsToday.length < 3) {
-                 availableSlotsToday.push(slot);
-            } else if (preferredTimeIndex === -1 && availableSlotsToday.length < 3) { 
-                 availableSlotsToday.push(slot);
-            }
-        }
-      }
-      
-      const preferredDateString = preferredDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric'});
-      let suggestionMessage = `The selected slot (${preferredTime}) on ${preferredDateString} is already booked.`;
-      if (availableSlotsToday.length > 0) {
-        suggestionMessage += ` Suggested available slots for ${preferredDateString}: ${availableSlotsToday.join(", ")}.`;
-      } else {
-        suggestionMessage += ` No other slots are available on ${preferredDateString}. Please try another date.`;
-      }
-      
-      return {
-        message: suggestionMessage,
-        success: false,
-        slotAvailable: false,
-        suggestions: availableSlotsToday,
-        suggestionMessage: suggestionMessage,
-      };
-    }
-
-    // If slot is available, proceed to create appointment
     const now = Timestamp.now();
     const appointmentType = isOnline ? "Online" : "Clinic";
 
@@ -367,6 +259,9 @@ export async function createAppointmentAction(
         appointmentToSave.paidAt = now;
         appointmentToSave.status = "Paid & Scheduled"; 
       } else {
+        // This case might occur if payment initiation fails before this action is called,
+        // or if the flow is designed to create a pending appointment first.
+        // For the current direct Razorpay flow, this path is less likely for a *new* appointment.
         appointmentToSave.paymentStatus = "Pending";
         appointmentToSave.paymentMethod = "Razorpay"; 
       }
@@ -390,14 +285,13 @@ export async function createAppointmentAction(
       message: "Appointment created successfully!",
       appointment: newAppointmentForClient,
       success: true,
-      slotAvailable: true,
     };
 
   } catch (error) {
-    console.error("Error during appointment creation or availability check:", error);
-    let errorMessage = "Database Error: Failed to process appointment.";
+    console.error("Error during appointment creation:", error);
+    let errorMessage = "Database Error: Failed to create appointment.";
     if (error instanceof Error && error.message) {
-        errorMessage = `Failed to process appointment: ${error.message}`;
+        errorMessage = `Failed to create appointment: ${error.message}`;
     }
     return {
         message: errorMessage,
