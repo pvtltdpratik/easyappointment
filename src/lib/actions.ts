@@ -10,6 +10,22 @@ import Razorpay from "razorpay";
 
 const CONSULTATION_FEE_PAISE = 50000; // 500.00 INR, used for online consultations
 
+// Helper to generate standard time slots (9 AM - 5 PM, 30-min intervals)
+const generateStandardTimeSlots = () => {
+  const slots = [];
+  for (let i = 0; i < 17; i++) { // 9:00 AM to 5:00 PM is 8 hours * 2 slots/hour = 16 slots, plus 5:00 PM itself
+    const hour = 9 + Math.floor(i / 2);
+    const minute = i % 2 === 0 ? "00" : "30";
+    const period = hour < 12 || hour === 24 ? "AM" : "PM"; // handle 12 PM correctly
+    let displayHour = hour % 12;
+    if (displayHour === 0) displayHour = 12; // 12 AM/PM
+    slots.push(`${String(displayHour).padStart(2, '0')}:${minute} ${period}`);
+  }
+  return slots;
+};
+const allPossibleTimeSlots = generateStandardTimeSlots();
+
+
 export type AppointmentFormState = {
   message?: string | null;
   errors?: {
@@ -32,6 +48,10 @@ export type AppointmentFormState = {
   };
   appointment?: AppointmentRequest | null;
   success?: boolean;
+  // New fields for availability feedback
+  slotAvailable?: boolean;
+  suggestions?: string[];
+  suggestionMessage?: string;
 }
 
 export type AuthFormState = {
@@ -213,6 +233,7 @@ export async function createAppointmentAction(
 
   const { name, contactNumber, preferredDate, preferredTime, doctorId, isOnline, paymentId, orderId, signature } = validatedFields.data;
 
+  // 1. Validates the selected date and time
   const [time, period] = preferredTime.split(' ');
   const [hoursStr, minutesStr] = time.split(':');
   let hours = parseInt(hoursStr, 10);
@@ -225,53 +246,123 @@ export async function createAppointmentAction(
   }
 
   const appointmentDateTimeJS = new Date(preferredDate);
-  appointmentDateTimeJS.setHours(hours, minutes, 0, 0); 
+  appointmentDateTimeJS.setHours(hours, minutes, 0, 0);
+  const nowServer = new Date();
 
-  const now = Timestamp.now();
-  const appointmentType = isOnline ? "Online" : "Clinic";
-
-  const appointmentToSave: Omit<AppointmentRequest, 'appointmentDateTime' | 'createdAt' | 'updatedAt' | 'paidAt'> & { appointmentDateTime: Timestamp, createdAt: Timestamp, updatedAt: Timestamp, paidAt?: Timestamp } = {
-    name,
-    contactNumber: contactNumber || undefined,
-    appointmentDateTime: Timestamp.fromDate(appointmentDateTimeJS),
-    preferredTime, 
-    doctorId,
-    isOnline,
-    appointmentType,
-    status: "Scheduled", 
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  if (isOnline) {
-    appointmentToSave.amount = CONSULTATION_FEE_PAISE;
-    appointmentToSave.currency = "INR";
-    if (paymentId && orderId && signature) {
-      appointmentToSave.paymentId = paymentId;
-      appointmentToSave.orderId = orderId;
-      appointmentToSave.signature = signature;
-      appointmentToSave.paymentStatus = "Paid";
-      appointmentToSave.paymentMethod = "Razorpay";
-      appointmentToSave.paidAt = now;
-      appointmentToSave.status = "Paid & Scheduled"; 
-    } else {
-      appointmentToSave.paymentStatus = "Pending";
-    }
-  } else { // Offline appointment
-    appointmentToSave.paymentStatus = "PayAtClinic";
-    appointmentToSave.paymentMethod = "Offline";
-    // For offline, amount/currency might be determined at clinic or different.
-    // We can leave them undefined here or set a default clinic fee if applicable.
-    // appointmentToSave.amount = CLINIC_FEE_PAISE; 
-    // appointmentToSave.currency = "INR";
+  if (appointmentDateTimeJS < nowServer) {
+    return {
+      message: "Cannot book appointments in the past. Please select a future date or time.",
+      success: false,
+      slotAvailable: false,
+    };
   }
+  
+  // 2. Checks time slot availability
+  const appointmentsCollectionRef = collection(db, "appointments");
+  const dayStart = new Date(preferredDate);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(preferredDate);
+  dayEnd.setHours(23, 59, 59, 999);
 
+  const q = query(
+    appointmentsCollectionRef,
+    where("doctorId", "==", doctorId),
+    where("appointmentDateTime", ">=", Timestamp.fromDate(dayStart)),
+    where("appointmentDateTime", "<=", Timestamp.fromDate(dayEnd)),
+    where("status", "in", ["Scheduled", "Paid & Scheduled"]) // Active statuses
+  );
 
   try {
-    const docRef = await addDoc(collection(db, "appointments"), appointmentToSave);
-    console.log("Appointment saved to Firestore with ID: ", docRef.id);
+    const querySnapshot = await getDocs(q);
+    const bookedTimesOnDay = querySnapshot.docs.map(doc => doc.data().preferredTime);
 
+    if (bookedTimesOnDay.includes(preferredTime)) {
+      // 3. Suggests alternatives if the slot is taken
+      const availableSlotsToday: string[] = [];
+      const preferredTimeIndex = allPossibleTimeSlots.indexOf(preferredTime);
+
+      for (let i = 0; i < allPossibleTimeSlots.length; i++) {
+        const slot = allPossibleTimeSlots[i];
+        if (bookedTimesOnDay.includes(slot)) continue;
+
+        // Check if the slot is in the future if the date is today
+        const slotDateTime = new Date(preferredDate);
+        const [slotTime, slotPeriod] = slot.split(' ');
+        const [slotHoursStr, slotMinutesStr] = slotTime.split(':');
+        let slotHours = parseInt(slotHoursStr, 10);
+        const slotMinutes = parseInt(slotMinutesStr, 10);
+        if (slotPeriod.toUpperCase() === 'PM' && slotHours < 12) slotHours += 12;
+        if (slotPeriod.toUpperCase() === 'AM' && slotHours === 12) slotHours = 0;
+        slotDateTime.setHours(slotHours, slotMinutes, 0, 0);
+        
+        if (slotDateTime > nowServer) {
+            if (i > preferredTimeIndex && availableSlotsToday.length < 3) { // Suggest slots after the requested one
+                 availableSlotsToday.push(slot);
+            } else if (preferredTimeIndex === -1 && availableSlotsToday.length < 3) { // Fallback if preferredTime wasn't in allPossible (should not happen)
+                 availableSlotsToday.push(slot);
+            }
+        }
+      }
+      
+      let suggestionMessage = `The selected slot (${preferredTime}) is already booked.`;
+      if (availableSlotsToday.length > 0) {
+        suggestionMessage += ` Available slots on ${preferredDate.toLocaleDateString()}: ${availableSlotsToday.join(", ")}.`;
+      } else {
+        suggestionMessage += ` No other slots are available on ${preferredDate.toLocaleDateString()}. Please try another date.`;
+      }
+      
+      return {
+        message: suggestionMessage,
+        success: false,
+        slotAvailable: false,
+        suggestions: availableSlotsToday,
+        suggestionMessage: suggestionMessage,
+      };
+    }
+
+    // If slot is available, proceed to create appointment
+    const now = Timestamp.now();
+    const appointmentType = isOnline ? "Online" : "Clinic";
+
+    const appointmentToSave: Omit<AppointmentRequest, 'id' | 'appointmentDateTime' | 'createdAt' | 'updatedAt' | 'paidAt'> & { appointmentDateTime: Timestamp, createdAt: Timestamp, updatedAt: Timestamp, paidAt?: Timestamp } = {
+      name,
+      contactNumber: contactNumber || undefined,
+      appointmentDateTime: Timestamp.fromDate(appointmentDateTimeJS),
+      preferredTime, 
+      doctorId,
+      isOnline,
+      appointmentType,
+      status: "Scheduled", 
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    if (isOnline) {
+      appointmentToSave.amount = CONSULTATION_FEE_PAISE;
+      appointmentToSave.currency = "INR";
+      if (paymentId && orderId && signature) {
+        appointmentToSave.paymentId = paymentId;
+        appointmentToSave.orderId = orderId;
+        appointmentToSave.signature = signature;
+        appointmentToSave.paymentStatus = "Paid";
+        appointmentToSave.paymentMethod = "Razorpay";
+        appointmentToSave.paidAt = now;
+        appointmentToSave.status = "Paid & Scheduled"; 
+      } else {
+        // This case should ideally be handled before calling createAppointmentAction for online if payment is mandatory
+        // For now, if it reaches here without payment details, mark as pending
+        appointmentToSave.paymentStatus = "Pending";
+        appointmentToSave.paymentMethod = "Razorpay"; // Assuming Razorpay is the method
+      }
+    } else { 
+      appointmentToSave.paymentStatus = "PayAtClinic";
+      appointmentToSave.paymentMethod = "Offline";
+    }
+
+    const docRef = await addDoc(collection(db, "appointments"), appointmentToSave);
+    
     const newAppointmentForClient: AppointmentRequest = {
+      id: docRef.id,
       ...appointmentToSave,
       appointmentDateTime: appointmentDateTimeJS,
       createdAt: now.toDate(),
@@ -280,19 +371,21 @@ export async function createAppointmentAction(
     };
 
     return {
-      message: "Appointment created successfully and saved to Firestore!",
+      message: "Appointment created successfully!",
       appointment: newAppointmentForClient,
       success: true,
+      slotAvailable: true,
     };
+
   } catch (error) {
-    console.error("Failed to create appointment in Firestore:", error);
-    let errorMessage = "Database Error: Failed to save appointment to Firestore.";
+    console.error("Error during appointment creation or availability check:", error);
+    let errorMessage = "Database Error: Failed to process appointment.";
     if (error instanceof Error && error.message) {
-        errorMessage = `Failed to save to Firestore: ${error.message}`;
+        errorMessage = `Failed to process appointment: ${error.message}`;
     }
     return {
         message: errorMessage,
-        errors: { _form: ["An unexpected error occurred while saving the appointment to Firestore."] },
+        errors: { _form: ["An unexpected error occurred."] },
         success: false,
     };
   }
@@ -318,7 +411,8 @@ export async function getDoctorsAction(): Promise<GetDoctorsState> {
     });
 
     if (doctorsList.length === 0) {
-      console.warn("No doctors found in Firestore 'doctors' collection.");
+      // This is not an error, but a state to be handled by UI
+      // console.warn("No doctors found in Firestore 'doctors' collection.");
     }
 
     return { doctors: doctorsList, success: true };
@@ -347,9 +441,9 @@ export async function createRazorpayOrderAction(data: { amount: number }): Promi
     });
 
     const options = {
-      amount: amount, // Amount in the smallest currency unit (e.g., paise for INR)
+      amount: amount, 
       currency: "INR",
-      receipt: `receipt_order_${new Date().getTime()}`, // Unique receipt ID
+      receipt: `receipt_order_${new Date().getTime()}`, 
     };
 
     const order = await instance.orders.create(options);
@@ -372,7 +466,9 @@ export async function createRazorpayOrderAction(data: { amount: number }): Promi
     if (error instanceof Error) {
         errorMessage = `Razorpay Error: ${error.message}`;
     }
+    if (typeof error === 'object' && error !== null && 'error' in error && typeof error.error === 'object' && error.error !== null && 'description' in error.error) {
+        errorMessage = `Razorpay Error: ${ (error.error as {description: string}).description }`;
+    }
     return { success: false, error: errorMessage };
   }
 }
-
