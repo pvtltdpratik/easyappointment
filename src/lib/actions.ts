@@ -13,12 +13,20 @@ const CONSULTATION_FEE_PAISE = 50000; // 500.00 INR, used for online consultatio
 // Helper to generate standard time slots (9 AM - 5 PM, 30-min intervals)
 const generateStandardTimeSlots = () => {
   const slots = [];
-  for (let i = 0; i < 17; i++) { // 9:00 AM to 5:00 PM is 8 hours * 2 slots/hour = 16 slots, plus 5:00 PM itself
+  // 9:00 AM to 5:00 PM (inclusive of 9:00, 9:30 ... 4:30, 5:00 would be the start of a slot ending 5:30)
+  // To get slots like 9:00, 9:30, ... 16:30 (4:30 PM), we need 16 slots. (17-1)
+  // 9:00 AM is hour 9. 4:30 PM is hour 16 with minute 30.
+  // Number of 30-min intervals from 9:00 to 16:30 is (16.5 - 9) * 2 = 7.5 * 2 = 15 intervals. This means 16 slots.
+  // Slots: 9:00, 9:30, 10:00, 10:30, 11:00, 11:30, 12:00, 12:30, 1:00, 1:30, 2:00, 2:30, 3:00, 3:30, 4:00, 4:30
+  // This is 16 slots.
+  for (let i = 0; i < 16; i++) { 
     const hour = 9 + Math.floor(i / 2);
     const minute = i % 2 === 0 ? "00" : "30";
-    const period = hour < 12 || hour === 24 ? "AM" : "PM"; // handle 12 PM correctly
-    let displayHour = hour % 12;
-    if (displayHour === 0) displayHour = 12; // 12 AM/PM
+    const period = hour < 12 ? "AM" : "PM";
+    let displayHour = hour;
+    if (hour > 12) displayHour = hour - 12;
+    if (hour === 0) displayHour = 12; // Should not happen with 9-5 range
+    
     slots.push(`${String(displayHour).padStart(2, '0')}:${minute} ${period}`);
   }
   return slots;
@@ -234,20 +242,21 @@ export async function createAppointmentAction(
   const { name, contactNumber, preferredDate, preferredTime, doctorId, isOnline, paymentId, orderId, signature } = validatedFields.data;
 
   // 1. Validates the selected date and time
-  const [time, period] = preferredTime.split(' ');
-  const [hoursStr, minutesStr] = time.split(':');
+  const [timeStr, period] = preferredTime.split(' ');
+  const [hoursStr, minutesStr] = timeStr.split(':');
   let hours = parseInt(hoursStr, 10);
   const minutes = parseInt(minutesStr, 10);
 
   if (period.toUpperCase() === 'PM' && hours < 12) {
     hours += 12;
-  } else if (period.toUpperCase() === 'AM' && hours === 12) { 
+  } else if (period.toUpperCase() === 'AM' && hours === 12) { // 12 AM is midnight
     hours = 0;
   }
 
-  const appointmentDateTimeJS = new Date(preferredDate);
+  const appointmentDateTimeJS = new Date(preferredDate); // This date has 00:00:00 time
   appointmentDateTimeJS.setHours(hours, minutes, 0, 0);
-  const nowServer = new Date();
+  
+  const nowServer = new Date(); // Server's current time
 
   if (appointmentDateTimeJS < nowServer) {
     return {
@@ -259,6 +268,8 @@ export async function createAppointmentAction(
   
   // 2. Checks time slot availability
   const appointmentsCollectionRef = collection(db, "appointments");
+  
+  // Create a date range for the entire preferredDate
   const dayStart = new Date(preferredDate);
   dayStart.setHours(0, 0, 0, 0);
   const dayEnd = new Date(preferredDate);
@@ -269,44 +280,48 @@ export async function createAppointmentAction(
     where("doctorId", "==", doctorId),
     where("appointmentDateTime", ">=", Timestamp.fromDate(dayStart)),
     where("appointmentDateTime", "<=", Timestamp.fromDate(dayEnd)),
-    where("status", "in", ["Scheduled", "Paid & Scheduled"]) // Active statuses
+    where("status", "in", ["Scheduled", "Paid & Scheduled"]) // Consider only active bookings
   );
 
   try {
     const querySnapshot = await getDocs(q);
-    const bookedTimesOnDay = querySnapshot.docs.map(doc => doc.data().preferredTime);
+    const bookedTimesOnDay = querySnapshot.docs.map(doc => doc.data().preferredTime as string);
 
     if (bookedTimesOnDay.includes(preferredTime)) {
       // 3. Suggests alternatives if the slot is taken
       const availableSlotsToday: string[] = [];
-      const preferredTimeIndex = allPossibleTimeSlots.indexOf(preferredTime);
+      const preferredTimeIndex = allPossibleTimeSlots.indexOf(preferredTime); // Index of the requested slot
 
+      // Iterate through all possible slots to find alternatives
       for (let i = 0; i < allPossibleTimeSlots.length; i++) {
         const slot = allPossibleTimeSlots[i];
-        if (bookedTimesOnDay.includes(slot)) continue;
+        if (bookedTimesOnDay.includes(slot)) continue; // Skip if already booked
 
-        // Check if the slot is in the future if the date is today
+        // Check if the current slot is in the future, especially if it's for today
         const slotDateTime = new Date(preferredDate);
-        const [slotTime, slotPeriod] = slot.split(' ');
-        const [slotHoursStr, slotMinutesStr] = slotTime.split(':');
-        let slotHours = parseInt(slotHoursStr, 10);
-        const slotMinutes = parseInt(slotMinutesStr, 10);
-        if (slotPeriod.toUpperCase() === 'PM' && slotHours < 12) slotHours += 12;
-        if (slotPeriod.toUpperCase() === 'AM' && slotHours === 12) slotHours = 0;
-        slotDateTime.setHours(slotHours, slotMinutes, 0, 0);
+        const [sTime, sPeriod] = slot.split(' ');
+        const [sHoursStr, sMinutesStr] = sTime.split(':');
+        let sHours = parseInt(sHoursStr, 10);
+        const sMinutes = parseInt(sMinutesStr, 10);
+        if (sPeriod.toUpperCase() === 'PM' && sHours < 12) sHours += 12;
+        if (sPeriod.toUpperCase() === 'AM' && sHours === 12) sHours = 0; // Midnight
+        slotDateTime.setHours(sHours, sMinutes, 0, 0);
         
-        if (slotDateTime > nowServer) {
-            if (i > preferredTimeIndex && availableSlotsToday.length < 3) { // Suggest slots after the requested one
+        if (slotDateTime > nowServer) { // Only suggest future slots
+            // Suggest slots that are after the originally requested slot
+            if (i > preferredTimeIndex && availableSlotsToday.length < 3) {
                  availableSlotsToday.push(slot);
-            } else if (preferredTimeIndex === -1 && availableSlotsToday.length < 3) { // Fallback if preferredTime wasn't in allPossible (should not happen)
+            } else if (preferredTimeIndex === -1 && availableSlotsToday.length < 3) { 
+                 // Fallback if preferredTime wasn't in allPossibleTimeSlots (should not happen with current form)
+                 // or if we just want any 3 future slots if the requested one was problematic
                  availableSlotsToday.push(slot);
             }
         }
       }
       
-      let suggestionMessage = `The selected slot (${preferredTime}) is already booked.`;
+      let suggestionMessage = `The selected slot (${preferredTime}) on ${preferredDate.toLocaleDateString()} is already booked.`;
       if (availableSlotsToday.length > 0) {
-        suggestionMessage += ` Available slots on ${preferredDate.toLocaleDateString()}: ${availableSlotsToday.join(", ")}.`;
+        suggestionMessage += ` Suggested available slots for ${preferredDate.toLocaleDateString()}: ${availableSlotsToday.join(", ")}.`;
       } else {
         suggestionMessage += ` No other slots are available on ${preferredDate.toLocaleDateString()}. Please try another date.`;
       }
@@ -332,7 +347,7 @@ export async function createAppointmentAction(
       doctorId,
       isOnline,
       appointmentType,
-      status: "Scheduled", 
+      status: "Scheduled", // Default status for new appointments
       createdAt: now,
       updatedAt: now,
     };
@@ -347,16 +362,16 @@ export async function createAppointmentAction(
         appointmentToSave.paymentStatus = "Paid";
         appointmentToSave.paymentMethod = "Razorpay";
         appointmentToSave.paidAt = now;
-        appointmentToSave.status = "Paid & Scheduled"; 
+        appointmentToSave.status = "Paid & Scheduled"; // Update status if paid
       } else {
-        // This case should ideally be handled before calling createAppointmentAction for online if payment is mandatory
-        // For now, if it reaches here without payment details, mark as pending
+        // If online and payment details are missing, it's pending (though current flow tries to pay first)
         appointmentToSave.paymentStatus = "Pending";
         appointmentToSave.paymentMethod = "Razorpay"; // Assuming Razorpay is the method
       }
-    } else { 
+    } else { // Offline appointment
       appointmentToSave.paymentStatus = "PayAtClinic";
       appointmentToSave.paymentMethod = "Offline";
+      // Amount/currency for offline can be handled differently or not set here
     }
 
     const docRef = await addDoc(collection(db, "appointments"), appointmentToSave);
@@ -364,7 +379,7 @@ export async function createAppointmentAction(
     const newAppointmentForClient: AppointmentRequest = {
       id: docRef.id,
       ...appointmentToSave,
-      appointmentDateTime: appointmentDateTimeJS,
+      appointmentDateTime: appointmentDateTimeJS, // Convert Timestamp back to JS Date for client
       createdAt: now.toDate(),
       updatedAt: now.toDate(),
       paidAt: appointmentToSave.paidAt ? appointmentToSave.paidAt.toDate() : undefined,
@@ -441,9 +456,9 @@ export async function createRazorpayOrderAction(data: { amount: number }): Promi
     });
 
     const options = {
-      amount: amount, 
+      amount: amount, // amount in the smallest currency unit (e.g., paise for INR)
       currency: "INR",
-      receipt: `receipt_order_${new Date().getTime()}`, 
+      receipt: `receipt_order_${new Date().getTime()}`, // Example receipt_id
     };
 
     const order = await instance.orders.create(options);
@@ -466,9 +481,12 @@ export async function createRazorpayOrderAction(data: { amount: number }): Promi
     if (error instanceof Error) {
         errorMessage = `Razorpay Error: ${error.message}`;
     }
+    // Razorpay often returns error in a specific structure
     if (typeof error === 'object' && error !== null && 'error' in error && typeof error.error === 'object' && error.error !== null && 'description' in error.error) {
         errorMessage = `Razorpay Error: ${ (error.error as {description: string}).description }`;
     }
     return { success: false, error: errorMessage };
   }
 }
+
+    
