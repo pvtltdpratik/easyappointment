@@ -11,6 +11,9 @@ export const appointmentSchema = z.object({
   preferredTime: z.string().min(1, { message: "Please select a preferred time." }),
   doctorId: z.string().min(1, { message: "Please select a doctor." }),
   isOnline: z.boolean().default(false),
+  paymentId: z.string().optional(),
+  orderId: z.string().optional(),
+  signature: z.string().optional(),
 });
 
 export const registrationSchema = z.object({

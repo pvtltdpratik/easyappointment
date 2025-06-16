@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import type { z } from "zod";
 import { format } from "date-fns";
-import { CalendarIcon, Clock, User, Briefcase, Wifi, Phone, AlertCircle } from "lucide-react";
+import { CalendarIcon, Clock, User, Briefcase, Wifi, Phone, AlertCircle, CreditCard } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -37,7 +37,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import type { Doctor, User as UserType } from "@/lib/types";
 import { appointmentSchema } from "@/lib/schemas";
-import { createAppointmentAction, getDoctorsAction, type AppointmentFormState, type GetDoctorsState } from "@/lib/actions";
+import { createAppointmentAction, getDoctorsAction, createRazorpayOrderAction, type AppointmentFormState, type GetDoctorsState, type RazorpayOrderState } from "@/lib/actions";
 import { useToast } from "@/hooks/use-toast";
 import React, { useState, useTransition, useEffect } from "react";
 
@@ -49,14 +49,37 @@ const timeSlots = Array.from({ length: 17 }, (_, i) => {
   return `${String(displayHour).padStart(2, '0')}:${minute} ${period}`;
 });
 
+const CONSULTATION_FEE_PAISE = 50000; // 500.00 INR
+
+// Helper function to load Razorpay script
+const loadRazorpayScript = (src: string): Promise<boolean> => {
+  return new Promise((resolve) => {
+    if (document.querySelector(`script[src="${src}"]`)) {
+      resolve(true);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.onload = () => resolve(true);
+    script.onerror = () => {
+      console.error("Razorpay SDK failed to load.");
+      resolve(false);
+    };
+    document.body.appendChild(script);
+  });
+};
+
+
 export function AppointmentForm() {
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
+  const [isPaymentProcessing, setIsPaymentProcessing] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const [doctorsList, setDoctorsList] = useState<Doctor[]>([]);
   const [isLoadingDoctors, setIsLoadingDoctors] = useState(true);
   const [doctorsError, setDoctorsError] = useState<string | null>(null);
+  const [loggedInUser, setLoggedInUser] = useState<UserType | null>(null);
 
   const form = useForm<z.infer<typeof appointmentSchema>>({
     resolver: zodResolver(appointmentSchema),
@@ -71,7 +94,6 @@ export function AppointmentForm() {
   });
 
   useEffect(() => {
-    // Fetch doctors
     const fetchDoctors = async () => {
       setIsLoadingDoctors(true);
       setDoctorsError(null);
@@ -90,11 +112,11 @@ export function AppointmentForm() {
     };
     fetchDoctors();
 
-    // Pre-fill form data from logged-in user
     const storedUser = localStorage.getItem('easyAppointmentUser');
     if (storedUser) {
       try {
         const user: UserType = JSON.parse(storedUser);
+        setLoggedInUser(user);
         form.reset({
           ...form.getValues(),
           name: user.name || "",
@@ -107,51 +129,34 @@ export function AppointmentForm() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const resetFormToDefaults = () => {
+    form.reset({
+        name: loggedInUser?.name || "",
+        contactNumber: loggedInUser?.contactNumber || "",
+        preferredDate: undefined,
+        preferredTime: "",
+        doctorId: "",
+        isOnline: false,
+        paymentId: undefined,
+        orderId: undefined,
+        signature: undefined,
+    });
+  };
 
-  function onSubmit(values: z.infer<typeof appointmentSchema>) {
+  const handleScheduleAppointment = async (values: z.infer<typeof appointmentSchema>, paymentDetails?: { paymentId: string; orderId: string; signature: string }) => {
     setFormError(null);
+    const finalValues = paymentDetails ? { ...values, ...paymentDetails } : values;
+
     startTransition(async () => {
-      const result: AppointmentFormState = await createAppointmentAction(values);
+      const result: AppointmentFormState = await createAppointmentAction(finalValues);
       if (result.success) {
         toast({
           title: "Success!",
-          description: result.message || "Your appointment has been scheduled.",
+          description: result.message || (paymentDetails ? "Your payment was successful and appointment is scheduled." : "Your appointment has been scheduled."),
         });
-        const storedUser = localStorage.getItem('easyAppointmentUser');
-        let defaultName = "";
-        let defaultContact = "";
-        if (storedUser) {
-            try {
-                const user: UserType = JSON.parse(storedUser);
-                defaultName = user.name || "";
-                defaultContact = user.contactNumber || "";
-            } catch (e) { /* ignore */ }
-        }
-        form.reset({
-            name: defaultName,
-            contactNumber: defaultContact,
-            preferredDate: undefined,
-            preferredTime: "",
-            doctorId: "",
-            isOnline: false,
-        });
-
+        resetFormToDefaults();
       } else {
-        if (result.errors) {
-            Object.entries(result.errors).forEach(([field, messages]) => {
-                if (messages && messages.length > 0) {
-                    if (field === '_form') {
-                        setFormError(messages.join(', '));
-                    } else {
-                        form.setError(field as keyof z.infer<typeof appointmentSchema>, {
-                            type: "server",
-                            message: messages.join(', '),
-                        });
-                    }
-                }
-            });
-        }
-        const generalErrorMessage = result.errors?._form?.join(', ') || result.message || "Failed to schedule appointment. Please try again.";
+        const generalErrorMessage = result.errors?._form?.join(', ') || result.message || (paymentDetails ? "Payment was successful but failed to schedule appointment. Please contact support." : "Failed to schedule appointment. Please try again.");
         setFormError(generalErrorMessage);
         toast({
           title: "Error",
@@ -159,8 +164,95 @@ export function AppointmentForm() {
           variant: "destructive",
         });
       }
+      setIsPaymentProcessing(false);
     });
+  };
+
+
+  const handleOnlinePaymentAndScheduling = async (values: z.infer<typeof appointmentSchema>) => {
+    setIsPaymentProcessing(true);
+    setFormError(null);
+
+    const orderResult: RazorpayOrderState = await createRazorpayOrderAction({ amount: CONSULTATION_FEE_PAISE });
+
+    if (!orderResult.success || !orderResult.order) {
+      toast({
+        title: "Payment Error",
+        description: orderResult.error || "Could not initiate payment. Please try again.",
+        variant: "destructive",
+      });
+      setIsPaymentProcessing(false);
+      return;
+    }
+
+    const razorpayLoaded = await loadRazorpayScript("https://checkout.razorpay.com/v1/checkout.js");
+    if (!razorpayLoaded || typeof window.Razorpay === "undefined") {
+        toast({ title: "Payment Error", description: "Could not load payment gateway. Please refresh and try again.", variant: "destructive"});
+        setIsPaymentProcessing(false);
+        return;
+    }
+    
+    const { order } = orderResult;
+
+    const options = {
+      key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+      amount: order.amount,
+      currency: order.currency,
+      name: "Easy Appointment",
+      description: "Online Consultation Fee",
+      order_id: order.id,
+      handler: async (response: any) => {
+        await handleScheduleAppointment(values, {
+          paymentId: response.razorpay_payment_id,
+          orderId: response.razorpay_order_id,
+          signature: response.razorpay_signature,
+        });
+      },
+      prefill: {
+        name: values.name,
+        email: loggedInUser?.email || "", 
+        contact: values.contactNumber || loggedInUser?.contactNumber || "",
+      },
+      theme: {
+        color: "#73A5D6", // Using primary color from your theme
+      },
+      modal: {
+        ondismiss: function() {
+            toast({ title: "Payment Cancelled", description: "Your payment process was cancelled.", variant: "default"});
+            setIsPaymentProcessing(false);
+        }
+      }
+    };
+
+    try {
+        const rzp = new window.Razorpay(options);
+        rzp.on('payment.failed', function (response: any) {
+            console.error("Razorpay payment failed:", response.error);
+            toast({
+                title: "Payment Failed",
+                description: `${response.error.description || 'An error occurred during payment.'} (Reason: ${response.error.reason || 'Unknown'})`,
+                variant: "destructive",
+            });
+            setIsPaymentProcessing(false);
+        });
+        rzp.open();
+    } catch (error) {
+        console.error("Error opening Razorpay checkout:", error);
+        toast({ title: "Payment Error", description: "Could not initialize payment gateway. Please try again.", variant: "destructive"});
+        setIsPaymentProcessing(false);
+    }
+  };
+
+
+  function onSubmit(values: z.infer<typeof appointmentSchema>) {
+    if (values.isOnline) {
+      handleOnlinePaymentAndScheduling(values);
+    } else {
+      handleScheduleAppointment(values);
+    }
   }
+
+  const isOnlineConsultation = form.watch("isOnline");
 
   return (
     <Card className="w-full max-w-2xl shadow-xl">
@@ -318,7 +410,9 @@ export function AppointmentForm() {
                   <FormControl>
                     <Checkbox
                       checked={field.value}
-                      onCheckedChange={field.onChange}
+                      onCheckedChange={(checked) => {
+                        field.onChange(checked);
+                      }}
                       aria-label="Request online consultation"
                       id="isOnline"
                     />
@@ -328,7 +422,7 @@ export function AppointmentForm() {
                      <Wifi className="mr-2 h-4 w-4 text-accent" /> Request Online Consultation
                     </FormLabel>
                     <FormDescription>
-                      Check this box if you prefer an online video consultation.
+                      Check this box if you prefer an online video consultation (payment required). Fee: ₹{(CONSULTATION_FEE_PAISE / 100).toFixed(2)}
                     </FormDescription>
                   </div>
                 </FormItem>
@@ -339,8 +433,16 @@ export function AppointmentForm() {
                 <p className="text-sm font-medium text-destructive">{formError}</p>
             )}
 
-            <Button type="submit" className="w-full md:w-auto" disabled={isPending || isLoadingDoctors}>
-              {isPending ? "Scheduling..." : "Schedule Appointment"}
+            <Button 
+              type="submit" 
+              className="w-full md:w-auto" 
+              disabled={isPending || isLoadingDoctors || isPaymentProcessing}
+            >
+              {isOnlineConsultation ? <CreditCard className="mr-2 h-4 w-4" /> : null}
+              {isPending ? "Scheduling..." : 
+                isPaymentProcessing ? "Processing Payment..." : 
+                isOnlineConsultation ? "Pay & Schedule Appointment" : "Schedule Appointment"
+              }
             </Button>
           </form>
         </Form>

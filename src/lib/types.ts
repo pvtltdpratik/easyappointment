@@ -16,6 +16,9 @@ export interface AppointmentRequest {
   status: string;
   createdAt: Date;
   updatedAt: Date;
+  paymentId?: string; // Razorpay Payment ID
+  orderId?: string; // Razorpay Order ID
+  signature?: string; // Razorpay Signature for verification
 }
 
 // User type for authentication

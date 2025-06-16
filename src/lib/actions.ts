@@ -6,6 +6,7 @@ import type { AppointmentRequest, User, Doctor } from "./types";
 import { appointmentSchema, loginSchema, registrationSchema } from "./schemas";
 import { db } from "./firebase";
 import { collection, addDoc, query, where, getDocs, Timestamp, doc, setDoc } from "firebase/firestore";
+import Razorpay from "razorpay";
 
 export type AppointmentFormState = {
   message?: string | null;
@@ -16,6 +17,9 @@ export type AppointmentFormState = {
     preferredTime?: string[];
     doctorId?: string[];
     isOnline?: string[];
+    paymentId?: string[];
+    orderId?: string[];
+    signature?: string[];
     _form?: string[];
   };
   appointment?: AppointmentRequest | null;
@@ -34,6 +38,16 @@ export type AuthFormState = {
   };
   user?: User | null;
   success?: boolean;
+};
+
+export type RazorpayOrderState = {
+    success: boolean;
+    order?: {
+        id: string;
+        amount: number;
+        currency: string;
+    } | null;
+    error?: string | null;
 };
 
 export async function registerUserAction(
@@ -64,25 +78,23 @@ export async function registerUserAction(
       };
     }
 
-    // Create a new document with an auto-generated ID
     const newUserRef = doc(collection(db, "patients"));
     const newUserId = newUserRef.id;
     
     const newUser: User = {
-      id: newUserId, // Use Firestore generated ID
+      id: newUserId, 
       name,
       email,
       contactNumber: contactNumber || undefined,
-      password, // Storing plain text password for testing
-      createdAt: new Date(), // Will be converted to Timestamp by Firestore
+      password, 
+      createdAt: new Date(), 
     };
 
-    // Firestore handles Date to Timestamp conversion automatically
     const patientDataToSave = {
         name: newUser.name,
         email: newUser.email,
         contactNumber: newUser.contactNumber || null,
-        password: newUser.password, // Storing plain text password
+        password: newUser.password, 
         createdAt: Timestamp.fromDate(newUser.createdAt!),
     };
     
@@ -140,7 +152,7 @@ export async function loginUserAction(
     const userDoc = querySnapshot.docs[0];
     const userData = userDoc.data();
 
-    if (userData.password !== inputPassword) { // Comparing plain text passwords
+    if (userData.password !== inputPassword) { 
       return {
         errors: { _form: ["Invalid email or password."] },
         message: "Login failed.",
@@ -153,14 +165,13 @@ export async function loginUserAction(
       name: userData.name,
       email: userData.email,
       contactNumber: userData.contactNumber || undefined,
-      // Do not include password in the object returned to client
-      imageUrl: userData.imageUrl || undefined, // Assuming imageUrl might exist
+      imageUrl: userData.imageUrl || undefined, 
       createdAt: userData.createdAt ? (userData.createdAt as Timestamp).toDate() : undefined,
     };
     
     return {
       message: "Login successful!",
-      user: user, // User object without password
+      user: user, 
       success: true,
     };
 
@@ -192,9 +203,8 @@ export async function createAppointmentAction(
     };
   }
 
-  const { name, contactNumber, preferredDate, preferredTime, doctorId, isOnline } = validatedFields.data;
+  const { name, contactNumber, preferredDate, preferredTime, doctorId, isOnline, paymentId, orderId, signature } = validatedFields.data;
 
-  // Combine preferredDate and preferredTime into a single appointmentDateTime
   const [time, period] = preferredTime.split(' ');
   const [hoursStr, minutesStr] = time.split(':');
   let hours = parseInt(hoursStr, 10);
@@ -202,26 +212,34 @@ export async function createAppointmentAction(
 
   if (period.toUpperCase() === 'PM' && hours < 12) {
     hours += 12;
-  } else if (period.toUpperCase() === 'AM' && hours === 12) { // Handle 12 AM (midnight)
+  } else if (period.toUpperCase() === 'AM' && hours === 12) { 
     hours = 0;
   }
 
   const appointmentDateTimeJS = new Date(preferredDate);
-  appointmentDateTimeJS.setHours(hours, minutes, 0, 0); // Set hours, minutes, seconds, ms
+  appointmentDateTimeJS.setHours(hours, minutes, 0, 0); 
 
   const now = Timestamp.now();
 
-  const appointmentToSave = {
+  const appointmentToSave: any = {
     name,
     contactNumber: contactNumber || null,
     appointmentDateTime: Timestamp.fromDate(appointmentDateTimeJS),
-    preferredTime, // Store the original string time as well
+    preferredTime, 
     doctorId,
     isOnline,
-    status: "Scheduled", // Default status
+    status: "Scheduled", 
     createdAt: now,
     updatedAt: now,
   };
+
+  if (isOnline && paymentId && orderId && signature) {
+    appointmentToSave.paymentId = paymentId;
+    appointmentToSave.orderId = orderId;
+    appointmentToSave.signature = signature;
+    appointmentToSave.status = "Paid & Scheduled"; 
+  }
+
 
   try {
     const docRef = await addDoc(collection(db, "appointments"), appointmentToSave);
@@ -237,6 +255,9 @@ export async function createAppointmentAction(
       status: appointmentToSave.status,
       createdAt: now.toDate(),
       updatedAt: now.toDate(),
+      paymentId: appointmentToSave.paymentId,
+      orderId: appointmentToSave.orderId,
+      signature: appointmentToSave.signature,
     };
 
     return {
@@ -289,5 +310,49 @@ export async function getDoctorsAction(): Promise<GetDoctorsState> {
         errorMessage = `Failed to fetch doctors: ${error.message}`;
     }
     return { error: errorMessage, success: false };
+  }
+}
+
+
+export async function createRazorpayOrderAction(data: { amount: number }): Promise<RazorpayOrderState> {
+  const { amount } = data;
+  if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+    console.error("Razorpay Key ID or Key Secret is not set in environment variables.");
+    return { success: false, error: "Razorpay API keys are not configured on the server." };
+  }
+
+  try {
+    const instance = new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET,
+    });
+
+    const options = {
+      amount: amount, // Amount in the smallest currency unit (e.g., paise for INR)
+      currency: "INR",
+      receipt: `receipt_order_${new Date().getTime()}`, // Unique receipt ID
+    };
+
+    const order = await instance.orders.create(options);
+
+    if (!order) {
+      return { success: false, error: "Failed to create Razorpay order." };
+    }
+
+    return {
+      success: true,
+      order: {
+        id: order.id,
+        amount: order.amount,
+        currency: order.currency,
+      },
+    };
+  } catch (error) {
+    console.error("Razorpay order creation error:", error);
+    let errorMessage = "Failed to create Razorpay order due to an unexpected error.";
+    if (error instanceof Error) {
+        errorMessage = `Razorpay Error: ${error.message}`;
+    }
+    return { success: false, error: errorMessage };
   }
 }
