@@ -11,9 +11,17 @@ export const appointmentSchema = z.object({
   preferredTime: z.string().min(1, { message: "Please select a preferred time." }),
   doctorId: z.string().min(1, { message: "Please select a doctor." }),
   isOnline: z.boolean().default(false),
+  
+  // Payment related fields - mostly optional from form, set by backend
   paymentId: z.string().optional(),
   orderId: z.string().optional(),
   signature: z.string().optional(),
+  appointmentType: z.enum(["Online", "Clinic"]).optional(),
+  paymentStatus: z.enum(["Paid", "Pending", "Failed", "PayAtClinic", "Refunded"]).optional(),
+  paymentMethod: z.string().optional(),
+  amount: z.number().optional(),
+  currency: z.string().optional(),
+  paidAt: z.date().optional(),
 });
 
 export const registrationSchema = z.object({
@@ -31,3 +39,4 @@ export const loginSchema = z.object({
   email: z.string().email({ message: "Invalid email address." }),
   password: z.string().min(1, { message: "Password is required." }),
 });
+

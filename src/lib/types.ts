@@ -13,12 +13,20 @@ export interface AppointmentRequest {
   isOnline: boolean;
   contactNumber?: string;
   userEmail?: string;
-  status: string;
+  status: string; // Overall status like "Scheduled", "Paid & Scheduled", "Cancelled"
   createdAt: Date;
   updatedAt: Date;
-  paymentId?: string; // Razorpay Payment ID
+  
+  // Payment Integration Fields
+  paymentId?: string; // Razorpay Payment ID (serves as transactionId)
   orderId?: string; // Razorpay Order ID
   signature?: string; // Razorpay Signature for verification
+  appointmentType?: "Online" | "Clinic"; // Type of appointment
+  paymentStatus?: "Paid" | "Pending" | "Failed" | "PayAtClinic" | "Refunded"; // Status of the payment
+  paymentMethod?: string; // e.g., "Razorpay", "Credit Card", "UPI", "Offline", "Cash"
+  amount?: number; // Amount paid or due
+  currency?: string; // e.g., "INR", "USD"
+  paidAt?: Date; // Timestamp of when payment was successfully made
 }
 
 // User type for authentication
@@ -31,3 +39,4 @@ export interface User {
   imageUrl?: string;
   createdAt?: Date; // Added for Firestore record
 }
+

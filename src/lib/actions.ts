@@ -8,6 +8,8 @@ import { db } from "./firebase";
 import { collection, addDoc, query, where, getDocs, Timestamp, doc, setDoc } from "firebase/firestore";
 import Razorpay from "razorpay";
 
+const CONSULTATION_FEE_PAISE = 50000; // 500.00 INR, used for online consultations
+
 export type AppointmentFormState = {
   message?: string | null;
   errors?: {
@@ -20,6 +22,12 @@ export type AppointmentFormState = {
     paymentId?: string[];
     orderId?: string[];
     signature?: string[];
+    appointmentType?: string[];
+    paymentStatus?: string[];
+    paymentMethod?: string[];
+    amount?: string[];
+    currency?: string[];
+    paidAt?: string[];
     _form?: string[];
   };
   appointment?: AppointmentRequest | null;
@@ -220,24 +228,42 @@ export async function createAppointmentAction(
   appointmentDateTimeJS.setHours(hours, minutes, 0, 0); 
 
   const now = Timestamp.now();
+  const appointmentType = isOnline ? "Online" : "Clinic";
 
-  const appointmentToSave: any = {
+  const appointmentToSave: Omit<AppointmentRequest, 'appointmentDateTime' | 'createdAt' | 'updatedAt' | 'paidAt'> & { appointmentDateTime: Timestamp, createdAt: Timestamp, updatedAt: Timestamp, paidAt?: Timestamp } = {
     name,
-    contactNumber: contactNumber || null,
+    contactNumber: contactNumber || undefined,
     appointmentDateTime: Timestamp.fromDate(appointmentDateTimeJS),
     preferredTime, 
     doctorId,
     isOnline,
+    appointmentType,
     status: "Scheduled", 
     createdAt: now,
     updatedAt: now,
   };
 
-  if (isOnline && paymentId && orderId && signature) {
-    appointmentToSave.paymentId = paymentId;
-    appointmentToSave.orderId = orderId;
-    appointmentToSave.signature = signature;
-    appointmentToSave.status = "Paid & Scheduled"; 
+  if (isOnline) {
+    appointmentToSave.amount = CONSULTATION_FEE_PAISE;
+    appointmentToSave.currency = "INR";
+    if (paymentId && orderId && signature) {
+      appointmentToSave.paymentId = paymentId;
+      appointmentToSave.orderId = orderId;
+      appointmentToSave.signature = signature;
+      appointmentToSave.paymentStatus = "Paid";
+      appointmentToSave.paymentMethod = "Razorpay";
+      appointmentToSave.paidAt = now;
+      appointmentToSave.status = "Paid & Scheduled"; 
+    } else {
+      appointmentToSave.paymentStatus = "Pending";
+    }
+  } else { // Offline appointment
+    appointmentToSave.paymentStatus = "PayAtClinic";
+    appointmentToSave.paymentMethod = "Offline";
+    // For offline, amount/currency might be determined at clinic or different.
+    // We can leave them undefined here or set a default clinic fee if applicable.
+    // appointmentToSave.amount = CLINIC_FEE_PAISE; 
+    // appointmentToSave.currency = "INR";
   }
 
 
@@ -246,18 +272,11 @@ export async function createAppointmentAction(
     console.log("Appointment saved to Firestore with ID: ", docRef.id);
 
     const newAppointmentForClient: AppointmentRequest = {
-      name: appointmentToSave.name,
+      ...appointmentToSave,
       appointmentDateTime: appointmentDateTimeJS,
-      preferredTime: appointmentToSave.preferredTime,
-      doctorId: appointmentToSave.doctorId,
-      isOnline: appointmentToSave.isOnline,
-      contactNumber: appointmentToSave.contactNumber || undefined,
-      status: appointmentToSave.status,
       createdAt: now.toDate(),
       updatedAt: now.toDate(),
-      paymentId: appointmentToSave.paymentId,
-      orderId: appointmentToSave.orderId,
-      signature: appointmentToSave.signature,
+      paidAt: appointmentToSave.paidAt ? appointmentToSave.paidAt.toDate() : undefined,
     };
 
     return {
@@ -356,3 +375,4 @@ export async function createRazorpayOrderAction(data: { amount: number }): Promi
     return { success: false, error: errorMessage };
   }
 }
+
