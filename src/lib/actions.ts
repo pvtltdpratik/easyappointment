@@ -231,9 +231,7 @@ export async function createAppointmentAction(
     hours = 0;
   }
   
-  const appointmentDateTimeJS = new Date(preferredDate);
-  appointmentDateTimeJS.setHours(hours, minutes, 0, 0);
-
+  const appointmentDateTimeJS = new Date(preferredDate.getTime() + hours * 60 * 60 * 1000 + minutes * 60 * 1000);
   
   try {
     const now = Timestamp.now();
@@ -272,7 +270,11 @@ export async function createAppointmentAction(
       appointmentToSave.paymentMethod = "Offline";
     }
 
+    // Save to date-specific collection and get the document reference
     const docRef = await addDoc(collection(db, collectionName), appointmentToSave);
+
+    // Save the same document with the same ID to the master 'appointments' collection
+    await setDoc(doc(db, "appointments", docRef.id), appointmentToSave);
     
     const newAppointmentForClient: AppointmentRequest = {
       id: docRef.id,
@@ -381,3 +383,5 @@ export async function createRazorpayOrderAction(data: { amount: number }): Promi
 }
     
       
+
+    
