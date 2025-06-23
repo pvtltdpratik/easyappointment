@@ -214,6 +214,12 @@ export async function createAppointmentAction(
 
   const { name, contactNumber, preferredDate, preferredTime, doctorId, isOnline, paymentId, orderId, signature } = validatedFields.data;
 
+  // Format the date to create the collection name
+  const year = preferredDate.getFullYear();
+  const month = String(preferredDate.getMonth() + 1).padStart(2, '0');
+  const day = String(preferredDate.getDate()).padStart(2, '0');
+  const collectionName = `${year}-${month}-${day}-appointments`;
+
   const [timeStr, period] = preferredTime.split(' ');
   const [hoursStr, minutesStr] = timeStr.split(':');
   let hours = parseInt(hoursStr, 10);
@@ -225,10 +231,9 @@ export async function createAppointmentAction(
     hours = 0;
   }
   
-  const appointmentTimestamp = preferredDate.getTime() + 
-                               (hours * 60 * 60 * 1000) + 
-                               (minutes * 60 * 1000);
-  const appointmentDateTimeJS = new Date(appointmentTimestamp);
+  const appointmentDateTimeJS = new Date(preferredDate);
+  appointmentDateTimeJS.setHours(hours, minutes, 0, 0);
+
   
   try {
     const now = Timestamp.now();
@@ -259,9 +264,6 @@ export async function createAppointmentAction(
         appointmentToSave.paidAt = now;
         appointmentToSave.status = "Paid & Scheduled"; 
       } else {
-        // This case might occur if payment initiation fails before this action is called,
-        // or if the flow is designed to create a pending appointment first.
-        // For the current direct Razorpay flow, this path is less likely for a *new* appointment.
         appointmentToSave.paymentStatus = "Pending";
         appointmentToSave.paymentMethod = "Razorpay"; 
       }
@@ -270,7 +272,7 @@ export async function createAppointmentAction(
       appointmentToSave.paymentMethod = "Offline";
     }
 
-    const docRef = await addDoc(collection(db, "appointments"), appointmentToSave);
+    const docRef = await addDoc(collection(db, collectionName), appointmentToSave);
     
     const newAppointmentForClient: AppointmentRequest = {
       id: docRef.id,
