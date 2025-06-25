@@ -13,6 +13,8 @@ export interface AppointmentRequest {
   doctorId: string;
   isOnline: boolean;
   contactNumber?: string;
+  address?: string;
+  BP?: string;
   userEmail?: string; // Optional: if linking appointments to registered users
   status: string; 
   createdAt: Date;
@@ -38,5 +40,6 @@ export interface User {
   contactNumber?: string;
   password?: string; // Password stored for testing - NOT FOR PRODUCTION
   imageUrl?: string;
+  address?: string;
   createdAt?: Date; 
 }

@@ -5,7 +5,7 @@ import type { z } from "zod";
 import type { AppointmentRequest, User, Doctor } from "./types";
 import { appointmentSchema, loginSchema, registrationSchema } from "./schemas";
 import { db } from "./firebase";
-import { collection, addDoc, query, where, getDocs, Timestamp, doc, setDoc } from "firebase/firestore";
+import { collection, addDoc, query, where, getDocs, Timestamp, doc, setDoc, updateDoc } from "firebase/firestore";
 import Razorpay from "razorpay";
 
 const CONSULTATION_FEE_PAISE = 50000; // 500.00 INR, used for online consultations
@@ -15,6 +15,8 @@ export type AppointmentFormState = {
   errors?: {
     name?: string[];
     contactNumber?: string[];
+    address?: string[];
+    BP?: string[];
     preferredDate?: string[];
     preferredTime?: string[];
     doctorId?: string[];
@@ -212,7 +214,38 @@ export async function createAppointmentAction(
     };
   }
 
-  const { name, contactNumber, preferredDate, preferredTime, doctorId, isOnline, paymentId, orderId, signature } = validatedFields.data;
+  const { name, contactNumber, address, BP, preferredDate, preferredTime, doctorId, isOnline, paymentId, orderId, signature } = validatedFields.data;
+
+  // --- Patient Registration/Update Logic ---
+  if (contactNumber && contactNumber.trim() !== '') {
+    try {
+      const patientsCollection = collection(db, "patients");
+      const q = query(patientsCollection, where("contactNumber", "==", contactNumber));
+      const querySnapshot = await getDocs(q);
+
+      if (querySnapshot.empty) {
+        // Create new patient record
+        await addDoc(patientsCollection, {
+          name,
+          contactNumber,
+          address: address || null,
+          createdAt: Timestamp.now(),
+        });
+      } else {
+        // Update existing patient record if address is provided
+        if (address) {
+          const patientDocRef = querySnapshot.docs[0].ref;
+          await updateDoc(patientDocRef, { address });
+        }
+      }
+    } catch (error) {
+        console.error("Error during patient registration/update:", error);
+        // We can decide to either fail the whole action or just log the error and continue
+        // For now, let's continue with appointment creation but log the error
+    }
+  }
+  // --- End Patient Logic ---
+
 
   // Format the date to create the collection name
   const year = preferredDate.getFullYear();
@@ -240,6 +273,8 @@ export async function createAppointmentAction(
     const appointmentToSave: Omit<AppointmentRequest, 'id' | 'appointmentDateTime' | 'createdAt' | 'updatedAt' | 'paidAt'> & { appointmentDateTime: Timestamp, createdAt: Timestamp, updatedAt: Timestamp, paidAt?: Timestamp } = {
       name,
       contactNumber: contactNumber || undefined,
+      address: address || undefined,
+      BP: BP || undefined,
       appointmentDateTime: Timestamp.fromDate(appointmentDateTimeJS),
       preferredTime, 
       doctorId,
@@ -381,7 +416,3 @@ export async function createRazorpayOrderAction(data: { amount: number }): Promi
     return { success: false, error: errorMessage };
   }
 }
-    
-      
-
-    
