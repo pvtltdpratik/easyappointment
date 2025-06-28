@@ -14,6 +14,7 @@ export type AppointmentFormState = {
   message?: string | null;
   errors?: {
     name?: string[];
+    age?: string[];
     contactNumber?: string[];
     address?: string[];
     BP?: string[];
@@ -214,7 +215,7 @@ export async function createAppointmentAction(
     };
   }
 
-  const { name, contactNumber, address, BP, preferredDate, preferredTime, doctorId, isOnline, paymentId, orderId, signature } = validatedFields.data;
+  const { name, age, contactNumber, address, BP, preferredDate, preferredTime, doctorId, isOnline, paymentId, orderId, signature } = validatedFields.data;
 
   // --- Patient Registration/Update Logic ---
   if (contactNumber && contactNumber.trim() !== '') {
@@ -227,21 +228,27 @@ export async function createAppointmentAction(
         // Create new patient record
         await addDoc(patientsCollection, {
           name,
+          age: age || null,
           contactNumber,
           address: address || null,
           createdAt: Timestamp.now(),
         });
       } else {
-        // Update existing patient record if address is provided
+        // Update existing patient record
+        const patientDocRef = querySnapshot.docs[0].ref;
+        const updateData: { address?: string; age?: number } = {};
         if (address) {
-          const patientDocRef = querySnapshot.docs[0].ref;
-          await updateDoc(patientDocRef, { address });
+          updateData.address = address;
+        }
+        if (typeof age === 'number') {
+          updateData.age = age;
+        }
+        if (Object.keys(updateData).length > 0) {
+           await updateDoc(patientDocRef, updateData);
         }
       }
     } catch (error) {
         console.error("Error during patient registration/update:", error);
-        // We can decide to either fail the whole action or just log the error and continue
-        // For now, let's continue with appointment creation but log the error
     }
   }
   // --- End Patient Logic ---
@@ -264,7 +271,8 @@ export async function createAppointmentAction(
     hours = 0;
   }
   
-  const appointmentDateTimeJS = new Date(preferredDate.getTime() + hours * 60 * 60 * 1000 + minutes * 60 * 1000);
+  const appointmentDateTimeJS = new Date(preferredDate.getTime());
+  appointmentDateTimeJS.setHours(hours, minutes, 0, 0);
   
   try {
     const now = Timestamp.now();
@@ -272,6 +280,7 @@ export async function createAppointmentAction(
 
     const appointmentToSave: Omit<AppointmentRequest, 'id' | 'appointmentDateTime' | 'createdAt' | 'updatedAt' | 'paidAt'> & { appointmentDateTime: Timestamp, createdAt: Timestamp, updatedAt: Timestamp, paidAt?: Timestamp } = {
       name,
+      age: age || undefined,
       contactNumber: contactNumber || undefined,
       address: address || undefined,
       BP: BP || undefined,

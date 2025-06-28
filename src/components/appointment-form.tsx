@@ -86,6 +86,7 @@ export function AppointmentForm() {
     resolver: zodResolver(appointmentSchema),
     defaultValues: {
       name: "",
+      age: undefined,
       contactNumber: "",
       address: "",
       BP: "",
@@ -123,6 +124,7 @@ export function AppointmentForm() {
         form.reset({
           ...form.getValues(),
           name: user.name || "",
+          age: user.age || undefined,
           contactNumber: user.contactNumber || "",
           address: user.address || "",
         });
@@ -136,6 +138,7 @@ export function AppointmentForm() {
   const resetFormToDefaults = () => {
     form.reset({
         name: loggedInUser?.name || "",
+        age: loggedInUser?.age || undefined,
         contactNumber: loggedInUser?.contactNumber || "",
         address: loggedInUser?.address || "",
         BP: "",
@@ -282,21 +285,36 @@ export function AppointmentForm() {
                 </FormItem>
               )}
             />
-
-            <FormField
-              control={form.control}
-              name="contactNumber"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="flex items-center"><Phone className="mr-2 h-4 w-4 text-accent" />Contact Number</FormLabel>
-                  <FormControl>
-                    <Input type="tel" placeholder="e.g. 1234567890 (Required for Patient Record)" {...field} aria-label="Contact Number" />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
             
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <FormField
+                control={form.control}
+                name="age"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center"><User className="mr-2 h-4 w-4 text-accent" />Age (Optional)</FormLabel>
+                    <FormControl>
+                      <Input type="number" placeholder="e.g. 35" {...field} value={field.value ?? ''} aria-label="Age" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="contactNumber"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center"><Phone className="mr-2 h-4 w-4 text-accent" />Contact Number</FormLabel>
+                    <FormControl>
+                      <Input type="tel" placeholder="e.g. 1234567890 (Required for Patient Record)" {...field} aria-label="Contact Number" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
             <FormField
                 control={form.control}
                 name="address"

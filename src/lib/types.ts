@@ -8,6 +8,7 @@ export interface Doctor {
 export interface AppointmentRequest {
   id: string; // Firestore document ID, added after creation
   name: string;
+  age?: number;
   appointmentDateTime: Date; 
   preferredTime: string; 
   doctorId: string;
@@ -41,5 +42,6 @@ export interface User {
   password?: string; // Password stored for testing - NOT FOR PRODUCTION
   imageUrl?: string;
   address?: string;
+  age?: number;
   createdAt?: Date; 
 }
