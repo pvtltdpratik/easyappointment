@@ -17,7 +17,6 @@ export type AppointmentFormState = {
     age?: string[];
     contactNumber?: string[];
     address?: string[];
-    BP?: string[];
     preferredDate?: string[];
     preferredTime?: string[];
     doctorId?: string[];
@@ -215,7 +214,7 @@ export async function createAppointmentAction(
     };
   }
 
-  const { name, age, contactNumber, address, BP, preferredDate, preferredTime, doctorId, isOnline, paymentId, orderId, signature } = validatedFields.data;
+  const { name, age, contactNumber, address, preferredDate, preferredTime, doctorId, isOnline, paymentId, orderId, signature } = validatedFields.data;
 
   // --- Patient Registration/Update Logic ---
   if (contactNumber && contactNumber.trim() !== '') {
@@ -271,8 +270,9 @@ export async function createAppointmentAction(
     hours = 0;
   }
   
-  const appointmentDateTimeJS = new Date(preferredDate.getTime());
-  appointmentDateTimeJS.setHours(hours, minutes, 0, 0);
+  const appointmentDateTimeMillis = preferredDate.getTime() + (hours * 60 * 60 * 1000) + (minutes * 60 * 1000);
+  const appointmentDateTimeJS = new Date(appointmentDateTimeMillis);
+
   
   try {
     const now = Timestamp.now();
@@ -283,7 +283,6 @@ export async function createAppointmentAction(
       age: age || undefined,
       contactNumber: contactNumber || undefined,
       address: address || undefined,
-      BP: BP || undefined,
       appointmentDateTime: Timestamp.fromDate(appointmentDateTimeJS),
       preferredTime, 
       doctorId,

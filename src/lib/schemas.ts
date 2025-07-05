@@ -9,7 +9,6 @@ export const appointmentSchema = z.object({
   ),
   contactNumber: z.string().min(10, {message: "Contact number must be at least 10 digits."}).optional().or(z.literal('')), // Optional, allows empty string
   address: z.string().max(200, { message: "Address must be 200 characters or less." }).optional().or(z.literal('')),
-  BP: z.string().max(20, { message: "BP value must be 20 characters or less." }).optional().or(z.literal('')),
   preferredDate: z.date({
     required_error: "A date for the appointment is required.",
     invalid_type_error: "That's not a valid date!",

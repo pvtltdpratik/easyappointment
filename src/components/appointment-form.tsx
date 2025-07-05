@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import type { z } from "zod";
 import { format } from "date-fns";
-import { CalendarIcon, Clock, User, Briefcase, Wifi, Phone, AlertCircle, CreditCard, MapPin, HeartPulse } from "lucide-react";
+import { CalendarIcon, Clock, User, Briefcase, Wifi, Phone, AlertCircle, CreditCard, MapPin } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -89,7 +89,6 @@ export function AppointmentForm() {
       age: undefined,
       contactNumber: "",
       address: "",
-      BP: "",
       preferredDate: undefined,
       preferredTime: "",
       doctorId: "",
@@ -141,7 +140,6 @@ export function AppointmentForm() {
         age: loggedInUser?.age || undefined,
         contactNumber: loggedInUser?.contactNumber || "",
         address: loggedInUser?.address || "",
-        BP: "",
         preferredDate: undefined,
         preferredTime: "",
         doctorId: "",
@@ -315,33 +313,6 @@ export function AppointmentForm() {
               />
             </div>
 
-            <FormField
-                control={form.control}
-                name="address"
-                render={({ field }) => (
-                <FormItem>
-                    <FormLabel className="flex items-center"><MapPin className="mr-2 h-4 w-4 text-accent" />Address (Optional)</FormLabel>
-                    <FormControl>
-                    <Textarea placeholder="e.g. 123 Main St, Anytown, USA" {...field} aria-label="Address" />
-                    </FormControl>
-                    <FormMessage />
-                </FormItem>
-                )}
-            />
-            <FormField
-                control={form.control}
-                name="BP"
-                render={({ field }) => (
-                <FormItem>
-                    <FormLabel className="flex items-center"><HeartPulse className="mr-2 h-4 w-4 text-accent" />Blood Pressure (BP) (Optional)</FormLabel>
-                    <FormControl>
-                    <Input placeholder="e.g. 120/80" {...field} aria-label="Blood Pressure (BP)" />
-                    </FormControl>
-                    <FormMessage />
-                </FormItem>
-                )}
-            />
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <FormField
                 control={form.control}
@@ -410,6 +381,20 @@ export function AppointmentForm() {
                 )}
               />
             </div>
+
+            <FormField
+                control={form.control}
+                name="address"
+                render={({ field }) => (
+                <FormItem>
+                    <FormLabel className="flex items-center"><MapPin className="mr-2 h-4 w-4 text-accent" />Address (Optional)</FormLabel>
+                    <FormControl>
+                    <Textarea placeholder="e.g. 123 Main St, Anytown, USA" {...field} aria-label="Address" />
+                    </FormControl>
+                    <FormMessage />
+                </FormItem>
+                )}
+            />
 
             <FormField
               control={form.control}

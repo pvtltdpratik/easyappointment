@@ -15,7 +15,6 @@ export interface AppointmentRequest {
   isOnline: boolean;
   contactNumber?: string;
   address?: string;
-  BP?: string;
   userEmail?: string; // Optional: if linking appointments to registered users
   status: string; 
   createdAt: Date;
