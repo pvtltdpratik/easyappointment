@@ -35,6 +35,7 @@ export interface AppointmentRequest {
 // User type for authentication
 export interface User {
   id: string;
+  registrationId?: string;
   name: string;
   email: string;
   contactNumber?: string;

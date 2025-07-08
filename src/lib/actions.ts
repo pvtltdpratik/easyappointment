@@ -5,7 +5,7 @@ import type { z } from "zod";
 import type { AppointmentRequest, User, Doctor } from "./types";
 import { appointmentSchema, loginSchema, registrationSchema } from "./schemas";
 import { db } from "./firebase";
-import { collection, addDoc, query, where, getDocs, Timestamp, doc, setDoc, updateDoc } from "firebase/firestore";
+import { collection, addDoc, query, where, getDocs, Timestamp, doc, setDoc, updateDoc, runTransaction } from "firebase/firestore";
 import Razorpay from "razorpay";
 
 const CONSULTATION_FEE_PAISE = 50000; // 500.00 INR, used for online consultations
@@ -87,12 +87,39 @@ export async function registerUserAction(
         success: false,
       };
     }
+    
+    // Generate Registration ID using a transaction
+    const newRegistrationId = await runTransaction(db, async (transaction) => {
+        const counterRef = doc(db, "counters", "patientRegistration");
+        const counterDoc = await transaction.get(counterRef);
+
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        const dateString = `${year}${month}${day}`;
+
+        let newSequence = 1;
+        const dailyCounts = counterDoc.exists() ? counterDoc.data().dailyCounts || {} : {};
+        
+        if (dailyCounts[dateString]) {
+            newSequence = dailyCounts[dateString] + 1;
+        }
+
+        const newDailyCounts = { ...dailyCounts, [dateString]: newSequence };
+        transaction.set(counterRef, { dailyCounts: newDailyCounts });
+
+        const sequenceString = String(newSequence).padStart(4, '0'); // Pad with zeros to make it 4 digits
+        return `RUBY${dateString}${sequenceString}`;
+    });
+
 
     const newUserRef = doc(collection(db, "patients"));
     const newUserId = newUserRef.id;
     
     const newUser: User = {
-      id: newUserId, 
+      id: newUserId,
+      registrationId: newRegistrationId,
       name,
       email,
       contactNumber: contactNumber || undefined,
@@ -101,6 +128,7 @@ export async function registerUserAction(
     };
 
     const patientDataToSave = {
+        registrationId: newUser.registrationId,
         name: newUser.name,
         email: newUser.email,
         contactNumber: newUser.contactNumber || null,
@@ -173,6 +201,7 @@ export async function loginUserAction(
 
     const user: User = {
       id: userDoc.id,
+      registrationId: userData.registrationId || undefined,
       name: userData.name,
       email: userData.email,
       contactNumber: userData.contactNumber || undefined,
