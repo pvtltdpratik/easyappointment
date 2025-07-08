@@ -87,8 +87,7 @@ export async function registerUserAction(
         success: false,
       };
     }
-    
-    // Generate custom Registration ID using a transaction
+
     const newRegistrationId = await runTransaction(db, async (transaction) => {
         const counterRef = doc(db, "counters", "patientRegistration");
         const counterDoc = await transaction.get(counterRef);
@@ -101,7 +100,7 @@ export async function registerUserAction(
 
         let newSequence = 1;
         const dailyCounts = counterDoc.exists() ? counterDoc.data().dailyCounts || {} : {};
-        
+
         if (dailyCounts[dateString]) {
             newSequence = dailyCounts[dateString] + 1;
         }
@@ -109,41 +108,70 @@ export async function registerUserAction(
         const newDailyCounts = { ...dailyCounts, [dateString]: newSequence };
         transaction.set(counterRef, { dailyCounts: newDailyCounts }, { merge: true });
 
-        const sequenceString = String(newSequence).padStart(4, '0'); // Pad with zeros to make it 4 digits
+        const sequenceString = String(newSequence).padStart(4, '0');
         return `RUBY${dateString}${sequenceString}`;
     });
 
-
-    // Use the generated ID as the document ID
     const newUserRef = doc(db, "patients", newRegistrationId);
-    
-    const newUser: User = {
-      id: newRegistrationId,
-      registrationId: newRegistrationId,
-      name,
-      email,
-      contactNumber: contactNumber || undefined,
-      password, 
-      createdAt: new Date(), 
-    };
+
+    const nameParts = name.split(' ');
+    const firstName = nameParts[0] || '';
+    const lastName = nameParts.slice(1).join(' ') || '';
 
     const patientDataToSave = {
-        registrationId: newUser.registrationId,
-        name: newUser.name,
-        email: newUser.email,
-        contactNumber: newUser.contactNumber || null,
-        password: newUser.password, 
-        createdAt: Timestamp.fromDate(newUser.createdAt!),
+      // From form
+      firstName: firstName,
+      lastName: lastName,
+      email: email,
+      mobileNumber: contactNumber || "",
+      password: password,
+
+      // Default empty values
+      salutation: "",
+      middleName: "",
+      gender: "",
+      age: "",
+      dateOfBirth: null,
+      maritalStatus: "",
+      religion: "",
+      occupation: "",
+      education: "",
+      socioEconomic: "",
+      telephone: "",
+      permanentAddress: "",
+      currentAddress: "",
+      city: "",
+      birthMark: "",
+      idProofNumber: "",
+      referredBy: "",
+      accompaniedBy: "",
+      emrNumber: "",
+      pulse: "",
+      weight: "",
+      since: "",
+      alongWith: "",
+
+      // System generated
+      patientId: newRegistrationId,
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
     };
-    
+
     await setDoc(newUserRef, patientDataToSave);
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { password: _, ...userWithoutPassword } = newUser;
+    const userToReturn: User = {
+      id: newRegistrationId,
+      patientId: newRegistrationId,
+      firstName: firstName,
+      lastName: lastName,
+      name: name,
+      email: email,
+      mobileNumber: contactNumber,
+    };
 
     return {
       message: "Registration successful! You can now log in.",
-      user: userWithoutPassword,
+      user: userToReturn,
       success: true,
     };
   } catch (error) {
@@ -159,6 +187,7 @@ export async function registerUserAction(
     };
   }
 }
+
 
 export async function loginUserAction(
   data: z.infer<typeof loginSchema>
@@ -191,7 +220,7 @@ export async function loginUserAction(
     const userDoc = querySnapshot.docs[0];
     const userData = userDoc.data();
 
-    if (userData.password !== inputPassword) { 
+    if (userData.password !== inputPassword) {
       return {
         errors: { _form: ["Invalid email or password."] },
         message: "Login failed.",
@@ -201,17 +230,43 @@ export async function loginUserAction(
 
     const user: User = {
       id: userDoc.id,
-      registrationId: userData.registrationId || undefined,
-      name: userData.name,
       email: userData.email,
-      contactNumber: userData.contactNumber || undefined,
-      imageUrl: userData.imageUrl || undefined, 
+      name: [userData.firstName, userData.lastName].filter(Boolean).join(' '),
+      salutation: userData.salutation,
+      firstName: userData.firstName,
+      middleName: userData.middleName,
+      lastName: userData.lastName,
+      gender: userData.gender,
+      age: userData.age,
+      dateOfBirth: userData.dateOfBirth ? (userData.dateOfBirth as Timestamp).toDate() : undefined,
+      maritalStatus: userData.maritalStatus,
+      religion: userData.religion,
+      occupation: userData.occupation,
+      education: userData.education,
+      socioEconomic: userData.socioEconomic,
+      mobileNumber: userData.mobileNumber,
+      telephone: userData.telephone,
+      permanentAddress: userData.permanentAddress,
+      currentAddress: userData.currentAddress,
+      city: userData.city,
+      birthMark: userData.birthMark,
+      idProofNumber: userData.idProofNumber,
+      referredBy: userData.referredBy,
+      accompaniedBy: userData.accompaniedBy,
+      emrNumber: userData.emrNumber,
+      patientId: userData.patientId,
+      pulse: userData.pulse,
+      weight: userData.weight,
+      since: userData.since,
+      alongWith: userData.alongWith,
+      imageUrl: userData.imageUrl || undefined,
       createdAt: userData.createdAt ? (userData.createdAt as Timestamp).toDate() : undefined,
+      updatedAt: userData.updatedAt ? (userData.updatedAt as Timestamp).toDate() : undefined,
     };
-    
+
     return {
       message: "Login successful!",
-      user: user, 
+      user: user,
       success: true,
     };
 
@@ -249,55 +304,80 @@ export async function createAppointmentAction(
   if (contactNumber && contactNumber.trim() !== '') {
     try {
       const patientsCollection = collection(db, "patients");
-      const q = query(patientsCollection, where("contactNumber", "==", contactNumber));
+      const q = query(patientsCollection, where("mobileNumber", "==", contactNumber));
       const querySnapshot = await getDocs(q);
 
       if (querySnapshot.empty) {
-        // Create new patient record with a custom ID
         const newRegistrationId = await runTransaction(db, async (transaction) => {
             const counterRef = doc(db, "counters", "patientRegistration");
             const counterDoc = await transaction.get(counterRef);
-
             const today = new Date();
             const year = today.getFullYear();
             const month = String(today.getMonth() + 1).padStart(2, '0');
             const day = String(today.getDate()).padStart(2, '0');
             const dateString = `${year}${month}${day}`;
-
             let newSequence = 1;
             const dailyCounts = counterDoc.exists() ? counterDoc.data().dailyCounts || {} : {};
-            
             if (dailyCounts[dateString]) {
                 newSequence = dailyCounts[dateString] + 1;
             }
-
             const newDailyCounts = { ...dailyCounts, [dateString]: newSequence };
             transaction.set(counterRef, { dailyCounts: newDailyCounts }, { merge: true });
-
             const sequenceString = String(newSequence).padStart(4, '0');
             return `RUBY${dateString}${sequenceString}`;
         });
-        
+
         const newPatientRef = doc(db, "patients", newRegistrationId);
-        await setDoc(newPatientRef, {
-          registrationId: newRegistrationId,
-          name,
-          age: age || null,
-          contactNumber,
-          address: address || null,
-          createdAt: Timestamp.now(),
-        });
+        const nameParts = name.split(' ');
+        const firstName = nameParts[0] || '';
+        const lastName = nameParts.slice(1).join(' ') || '';
+
+        const newPatientData = {
+            firstName: firstName,
+            lastName: lastName,
+            age: age ? String(age) : "",
+            mobileNumber: contactNumber || "",
+            permanentAddress: address || "",
+            patientId: newRegistrationId,
+            createdAt: Timestamp.now(),
+            updatedAt: Timestamp.now(),
+            // Set other fields to empty/null
+            salutation: "",
+            middleName: "",
+            gender: "",
+            dateOfBirth: null,
+            maritalStatus: "",
+            religion: "",
+            occupation: "",
+            education: "",
+            socioEconomic: "",
+            telephone: "",
+            email: "",
+            currentAddress: "",
+            city: "",
+            birthMark: "",
+            idProofNumber: "",
+            referredBy: "",
+            accompaniedBy: "",
+            emrNumber: "",
+            pulse: "",
+            weight: "",
+            since: "",
+            alongWith: "",
+        };
+        await setDoc(newPatientRef, newPatientData);
       } else {
-        // Update existing patient record
         const patientDocRef = querySnapshot.docs[0].ref;
-        const updateData: { address?: string; age?: number } = {};
+        const updateData: { permanentAddress?: string; age?: string, updatedAt?: Timestamp } = {
+            updatedAt: Timestamp.now()
+        };
         if (address) {
-          updateData.address = address;
+          updateData.permanentAddress = address;
         }
         if (typeof age === 'number') {
-          updateData.age = age;
+          updateData.age = String(age);
         }
-        if (Object.keys(updateData).length > 0) {
+        if (Object.keys(updateData).length > 1) { // only update if there's more than just the timestamp
            await updateDoc(patientDocRef, updateData);
         }
       }
@@ -314,7 +394,6 @@ export async function createAppointmentAction(
   const day = String(preferredDate.getDate()).padStart(2, '0');
   const collectionName = `${year}-${month}-${day}-appointments`;
 
-  // Robustly calculate appointmentDateTimeJS using UTC offsets
   const appointmentDateMillis = preferredDate.getTime();
   const [timeStr, period] = preferredTime.split(' ');
   const [hoursStr, minutesStr] = timeStr.split(':');
@@ -328,7 +407,6 @@ export async function createAppointmentAction(
   const timeOffsetMillis = (hours * 60 * 60 * 1000) + (minutes * 60 * 1000);
   const appointmentDateTimeJS = new Date(appointmentDateMillis + timeOffsetMillis);
 
-  
   try {
     const now = Timestamp.now();
     const appointmentType = isOnline ? "Online" : "Clinic";
@@ -339,11 +417,11 @@ export async function createAppointmentAction(
       contactNumber: contactNumber || undefined,
       address: address || undefined,
       appointmentDateTime: Timestamp.fromDate(appointmentDateTimeJS),
-      preferredTime, 
+      preferredTime,
       doctorId,
       isOnline,
       appointmentType,
-      status: "Scheduled", 
+      status: "Scheduled",
       createdAt: now,
       updatedAt: now,
     };
@@ -358,26 +436,24 @@ export async function createAppointmentAction(
         appointmentToSave.paymentStatus = "Paid";
         appointmentToSave.paymentMethod = "Razorpay";
         appointmentToSave.paidAt = now;
-        appointmentToSave.status = "Paid & Scheduled"; 
+        appointmentToSave.status = "Paid & Scheduled";
       } else {
         appointmentToSave.paymentStatus = "Pending";
-        appointmentToSave.paymentMethod = "Razorpay"; 
+        appointmentToSave.paymentMethod = "Razorpay";
       }
-    } else { 
+    } else {
       appointmentToSave.paymentStatus = "PayAtClinic";
       appointmentToSave.paymentMethod = "Offline";
     }
 
-    // Save to date-specific collection and get the document reference
     const docRef = await addDoc(collection(db, collectionName), appointmentToSave);
 
-    // Save the same document with the same ID to the master 'appointments' collection
     await setDoc(doc(db, "appointments", docRef.id), appointmentToSave);
-    
+
     const newAppointmentForClient: AppointmentRequest = {
       id: docRef.id,
       ...appointmentToSave,
-      appointmentDateTime: appointmentDateTimeJS, 
+      appointmentDateTime: appointmentDateTimeJS,
       createdAt: now.toDate(),
       updatedAt: now.toDate(),
       paidAt: appointmentToSave.paidAt ? appointmentToSave.paidAt.toDate() : undefined,
@@ -448,9 +524,9 @@ export async function createRazorpayOrderAction(data: { amount: number }): Promi
     });
 
     const options = {
-      amount: amount, 
+      amount: amount,
       currency: "INR",
-      receipt: `receipt_order_${new Date().getTime()}`, 
+      receipt: `receipt_order_${new Date().getTime()}`,
     };
 
     const order = await instance.orders.create(options);

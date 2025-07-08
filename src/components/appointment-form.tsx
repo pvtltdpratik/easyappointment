@@ -123,9 +123,9 @@ export function AppointmentForm() {
         form.reset({
           ...form.getValues(),
           name: user.name || "",
-          age: user.age || undefined,
-          contactNumber: user.contactNumber || "",
-          address: user.address || "",
+          age: user.age ? parseInt(user.age, 10) : undefined,
+          contactNumber: user.mobileNumber || "",
+          address: user.permanentAddress || "",
         });
       } catch (e) {
         console.error("Failed to parse user for pre-filling appointment form:", e);
@@ -137,9 +137,9 @@ export function AppointmentForm() {
   const resetFormToDefaults = () => {
     form.reset({
         name: loggedInUser?.name || "",
-        age: loggedInUser?.age || undefined,
-        contactNumber: loggedInUser?.contactNumber || "",
-        address: loggedInUser?.address || "",
+        age: loggedInUser?.age ? parseInt(loggedInUser.age, 10) : undefined,
+        contactNumber: loggedInUser?.mobileNumber || "",
+        address: loggedInUser?.permanentAddress || "",
         preferredDate: undefined,
         preferredTime: "",
         doctorId: "",
@@ -198,7 +198,7 @@ export function AppointmentForm() {
         setIsPaymentProcessing(false);
         return;
     }
-    
+
     const { order } = orderResult;
 
     const options = {
@@ -217,8 +217,8 @@ export function AppointmentForm() {
       },
       prefill: {
         name: values.name,
-        email: loggedInUser?.email || "", 
-        contact: values.contactNumber || loggedInUser?.contactNumber || "",
+        email: loggedInUser?.email || "",
+        contact: values.contactNumber || loggedInUser?.mobileNumber || "",
       },
       theme: {
         color: "#73A5D6", // Using primary color from your theme
@@ -283,7 +283,7 @@ export function AppointmentForm() {
                 </FormItem>
               )}
             />
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <FormField
                 control={form.control}
@@ -292,7 +292,7 @@ export function AppointmentForm() {
                   <FormItem>
                     <FormLabel className="flex items-center"><User className="mr-2 h-4 w-4 text-accent" />Age (Optional)</FormLabel>
                     <FormControl>
-                      <Input type="number" placeholder="e.g. 35" {...field} value={field.value ?? ''} aria-label="Age" />
+                      <Input type="number" placeholder="e.g. 35" {...field} value={field.value ?? ''} onChange={e => field.onChange(e.target.value === '' ? undefined : Number(e.target.value))} aria-label="Age" />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -469,14 +469,14 @@ export function AppointmentForm() {
                 <p className="text-sm font-medium text-destructive">{formError}</p>
             )}
 
-            <Button 
-              type="submit" 
-              className="w-full md:w-auto" 
+            <Button
+              type="submit"
+              className="w-full md:w-auto"
               disabled={isPending || isLoadingDoctors || isPaymentProcessing}
             >
               {isOnlineConsultation ? <CreditCard className="mr-2 h-4 w-4" /> : null}
-              {isPending ? "Scheduling..." : 
-                isPaymentProcessing ? "Processing Payment..." : 
+              {isPending ? "Scheduling..." :
+                isPaymentProcessing ? "Processing Payment..." :
                 isOnlineConsultation ? "Pay & Schedule Appointment" : "Schedule Appointment"
               }
             </Button>
