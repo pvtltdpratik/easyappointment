@@ -15,7 +15,6 @@ export const appointmentSchema = z.object({
   }),
   preferredTime: z.string().min(1, { message: "Please select a preferred time." }),
   doctorId: z.string().min(1, { message: "Please select a doctor." }),
-  isOnline: z.boolean().default(false),
   
   // Payment related fields - mostly optional from form, set by backend
   paymentId: z.string().optional(),

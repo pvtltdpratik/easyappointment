@@ -5,13 +5,12 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import type { z } from "zod";
 import { format } from "date-fns";
-import { CalendarIcon, Clock, User, Briefcase, Wifi, Phone, AlertCircle, CreditCard, MapPin } from "lucide-react";
+import { CalendarIcon, Clock, User, Briefcase, Phone, AlertCircle, CreditCard, MapPin, Info } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -32,9 +31,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import type { Doctor, User as UserType } from "@/lib/types";
 import { appointmentSchema } from "@/lib/schemas";
@@ -50,7 +48,7 @@ const timeSlots = Array.from({ length: 17 }, (_, i) => {
   return `${String(displayHour).padStart(2, '0')}:${minute} ${period}`;
 });
 
-const CONSULTATION_FEE_PAISE = 50000; // 500.00 INR
+const CONSULTATION_FEE_PAISE = 99900; // 999.00 INR
 
 // Helper function to load Razorpay script
 const loadRazorpayScript = (src: string): Promise<boolean> => {
@@ -92,7 +90,6 @@ export function AppointmentForm() {
       preferredDate: undefined,
       preferredTime: "",
       doctorId: "",
-      isOnline: false,
     },
   });
 
@@ -143,27 +140,26 @@ export function AppointmentForm() {
         preferredDate: undefined,
         preferredTime: "",
         doctorId: "",
-        isOnline: false,
         paymentId: undefined,
         orderId: undefined,
         signature: undefined,
     });
   };
 
-  const handleScheduleAppointment = async (values: z.infer<typeof appointmentSchema>, paymentDetails?: { paymentId: string; orderId: string; signature: string }) => {
+  const handleScheduleAppointment = async (values: z.infer<typeof appointmentSchema>, paymentDetails: { paymentId: string; orderId: string; signature: string }) => {
     setFormError(null);
-    const finalValues = paymentDetails ? { ...values, ...paymentDetails } : values;
+    const finalValues = { ...values, ...paymentDetails };
 
     startTransition(async () => {
       const result: AppointmentFormState = await createAppointmentAction(finalValues);
       if (result.success) {
         toast({
           title: "Success!",
-          description: result.message || (paymentDetails ? "Your payment was successful and appointment is scheduled." : "Your appointment has been scheduled."),
+          description: result.message || "Your payment was successful and appointment is scheduled.",
         });
         resetFormToDefaults();
       } else {
-        const generalErrorMessage = result.errors?._form?.join(', ') || result.message || (paymentDetails ? "Payment was successful but failed to schedule appointment. Please contact support." : "Failed to schedule appointment. Please try again.");
+        const generalErrorMessage = result.errors?._form?.join(', ') || result.message || "Payment was successful but failed to schedule appointment. Please contact support.";
         setFormError(generalErrorMessage);
         toast({
           title: "Error",
@@ -252,14 +248,8 @@ export function AppointmentForm() {
 
 
   function onSubmit(values: z.infer<typeof appointmentSchema>) {
-    if (values.isOnline) {
-      handleOnlinePaymentAndScheduling(values);
-    } else {
-      handleScheduleAppointment(values);
-    }
+    handleOnlinePaymentAndScheduling(values);
   }
-
-  const isOnlineConsultation = form.watch("isOnline");
 
   return (
     <Card className="w-full max-w-2xl shadow-xl">
@@ -438,32 +428,13 @@ export function AppointmentForm() {
               )}
             />
 
-            <FormField
-              control={form.control}
-              name="isOnline"
-              render={({ field }) => (
-                <FormItem className="flex flex-row items-center space-x-3 space-y-0 rounded-md border p-4 shadow-sm">
-                  <FormControl>
-                    <Checkbox
-                      checked={field.value}
-                      onCheckedChange={(checked) => {
-                        field.onChange(checked);
-                      }}
-                      aria-label="Request online consultation"
-                      id="isOnline"
-                    />
-                  </FormControl>
-                  <div className="space-y-1 leading-none">
-                    <FormLabel htmlFor="isOnline" className="flex items-center cursor-pointer">
-                     <Wifi className="mr-2 h-4 w-4 text-accent" /> Request Online Consultation
-                    </FormLabel>
-                    <FormDescription>
-                      Check this box if you prefer an online video consultation (payment required). Fee: ₹{(CONSULTATION_FEE_PAISE / 100).toFixed(2)}
-                    </FormDescription>
-                  </div>
-                </FormItem>
-              )}
-            />
+            <Alert>
+              <Info className="h-4 w-4" />
+              <AlertTitle>Please Note</AlertTitle>
+              <AlertDescription>
+                A confirmation call will be made to you after scheduling. The total payment will be ₹{(CONSULTATION_FEE_PAISE / 100).toFixed(2)}.
+              </AlertDescription>
+            </Alert>
 
             {formError && (
                 <p className="text-sm font-medium text-destructive">{formError}</p>
@@ -474,10 +445,10 @@ export function AppointmentForm() {
               className="w-full md:w-auto"
               disabled={isPending || isLoadingDoctors || isPaymentProcessing}
             >
-              {isOnlineConsultation ? <CreditCard className="mr-2 h-4 w-4" /> : null}
+              <CreditCard className="mr-2 h-4 w-4" />
               {isPending ? "Scheduling..." :
                 isPaymentProcessing ? "Processing Payment..." :
-                isOnlineConsultation ? "Pay & Schedule Appointment" : "Schedule Appointment"
+                `Pay ₹${(CONSULTATION_FEE_PAISE / 100).toFixed(2)} & Schedule`
               }
             </Button>
           </form>

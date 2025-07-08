@@ -8,7 +8,7 @@ import { db } from "./firebase";
 import { collection, addDoc, query, where, getDocs, Timestamp, doc, setDoc, updateDoc, runTransaction } from "firebase/firestore";
 import Razorpay from "razorpay";
 
-const CONSULTATION_FEE_PAISE = 50000; // 500.00 INR, used for online consultations
+const CONSULTATION_FEE_PAISE = 99900; // 999.00 INR, used for online consultations
 
 export type AppointmentFormState = {
   message?: string | null;
@@ -20,7 +20,6 @@ export type AppointmentFormState = {
     preferredDate?: string[];
     preferredTime?: string[];
     doctorId?: string[];
-    isOnline?: string[];
     paymentId?: string[];
     orderId?: string[];
     signature?: string[];
@@ -118,20 +117,19 @@ export async function registerUserAction(
     const firstName = nameParts[0] || '';
     const lastName = nameParts.slice(1).join(' ') || '';
 
-    const patientDataToSave = {
+    const patientDataToSave: Omit<User, "id" | "name" | "password"> & { createdAt: Timestamp, updatedAt: Timestamp } = {
       // From form
       firstName: firstName,
       lastName: lastName,
       email: email,
       mobileNumber: contactNumber || "",
-      password: password,
-
+      
       // Default empty values
       salutation: "",
       middleName: "",
       gender: "",
       age: "",
-      dateOfBirth: null,
+      dateOfBirth: undefined,
       maritalStatus: "",
       religion: "",
       occupation: "",
@@ -150,6 +148,7 @@ export async function registerUserAction(
       weight: "",
       since: "",
       alongWith: "",
+      imageUrl: undefined,
 
       // System generated
       patientId: newRegistrationId,
@@ -157,16 +156,17 @@ export async function registerUserAction(
       updatedAt: Timestamp.now(),
     };
 
-    await setDoc(newUserRef, patientDataToSave);
+    await setDoc(newUserRef, { ...patientDataToSave, password: password });
+
 
     const userToReturn: User = {
       id: newRegistrationId,
-      patientId: newRegistrationId,
-      firstName: firstName,
-      lastName: lastName,
+      ...patientDataToSave,
       name: name,
-      email: email,
-      mobileNumber: contactNumber,
+      password: password,
+      createdAt: patientDataToSave.createdAt.toDate(),
+      updatedAt: patientDataToSave.updatedAt.toDate(),
+      dateOfBirth: patientDataToSave.dateOfBirth, // It's already undefined, so this is fine
     };
 
     return {
@@ -218,7 +218,7 @@ export async function loginUserAction(
     }
 
     const userDoc = querySnapshot.docs[0];
-    const userData = userDoc.data();
+    const userData = userDoc.data() as User;
 
     if (userData.password !== inputPassword) {
       return {
@@ -230,38 +230,11 @@ export async function loginUserAction(
 
     const user: User = {
       id: userDoc.id,
-      email: userData.email,
+      ...userData,
       name: [userData.firstName, userData.lastName].filter(Boolean).join(' '),
-      salutation: userData.salutation,
-      firstName: userData.firstName,
-      middleName: userData.middleName,
-      lastName: userData.lastName,
-      gender: userData.gender,
-      age: userData.age,
-      dateOfBirth: userData.dateOfBirth ? (userData.dateOfBirth as Timestamp).toDate() : undefined,
-      maritalStatus: userData.maritalStatus,
-      religion: userData.religion,
-      occupation: userData.occupation,
-      education: userData.education,
-      socioEconomic: userData.socioEconomic,
-      mobileNumber: userData.mobileNumber,
-      telephone: userData.telephone,
-      permanentAddress: userData.permanentAddress,
-      currentAddress: userData.currentAddress,
-      city: userData.city,
-      birthMark: userData.birthMark,
-      idProofNumber: userData.idProofNumber,
-      referredBy: userData.referredBy,
-      accompaniedBy: userData.accompaniedBy,
-      emrNumber: userData.emrNumber,
-      patientId: userData.patientId,
-      pulse: userData.pulse,
-      weight: userData.weight,
-      since: userData.since,
-      alongWith: userData.alongWith,
-      imageUrl: userData.imageUrl || undefined,
-      createdAt: userData.createdAt ? (userData.createdAt as Timestamp).toDate() : undefined,
-      updatedAt: userData.updatedAt ? (userData.updatedAt as Timestamp).toDate() : undefined,
+      dateOfBirth: userData.dateOfBirth ? (userData.dateOfBirth as unknown as Timestamp).toDate() : undefined,
+      createdAt: userData.createdAt ? (userData.createdAt as unknown as Timestamp).toDate() : undefined,
+      updatedAt: userData.updatedAt ? (userData.updatedAt as unknown as Timestamp).toDate() : undefined,
     };
 
     return {
@@ -298,7 +271,7 @@ export async function createAppointmentAction(
     };
   }
 
-  const { name, age, contactNumber, address, preferredDate, preferredTime, doctorId, isOnline, paymentId, orderId, signature } = validatedFields.data;
+  const { name, age, contactNumber, address, preferredDate, preferredTime, doctorId, paymentId, orderId, signature } = validatedFields.data;
 
   // --- Patient Registration/Update Logic ---
   if (contactNumber && contactNumber.trim() !== '') {
@@ -332,27 +305,23 @@ export async function createAppointmentAction(
         const firstName = nameParts[0] || '';
         const lastName = nameParts.slice(1).join(' ') || '';
 
-        const newPatientData = {
-            firstName: firstName,
-            lastName: lastName,
-            age: age ? String(age) : "",
-            mobileNumber: contactNumber || "",
-            permanentAddress: address || "",
-            patientId: newRegistrationId,
-            createdAt: Timestamp.now(),
-            updatedAt: Timestamp.now(),
-            // Set other fields to empty/null
+        const newPatientData: Omit<User, "id" | "name" | "password"> & { createdAt: Timestamp, updatedAt: Timestamp } = {
             salutation: "",
+            firstName: firstName,
             middleName: "",
+            lastName: lastName,
             gender: "",
-            dateOfBirth: null,
+            age: age ? String(age) : "",
+            dateOfBirth: undefined,
             maritalStatus: "",
             religion: "",
             occupation: "",
             education: "",
             socioEconomic: "",
+            mobileNumber: contactNumber || "",
             telephone: "",
             email: "",
+            permanentAddress: address || "",
             currentAddress: "",
             city: "",
             birthMark: "",
@@ -364,6 +333,10 @@ export async function createAppointmentAction(
             weight: "",
             since: "",
             alongWith: "",
+            imageUrl: undefined,
+            patientId: newRegistrationId,
+            createdAt: Timestamp.now(),
+            updatedAt: Timestamp.now(),
         };
         await setDoc(newPatientRef, newPatientData);
       } else {
@@ -409,7 +382,8 @@ export async function createAppointmentAction(
 
   try {
     const now = Timestamp.now();
-    const appointmentType = isOnline ? "Online" : "Clinic";
+    const isOnline = true;
+    const appointmentType = "Online";
 
     const appointmentToSave: Omit<AppointmentRequest, 'id' | 'appointmentDateTime' | 'createdAt' | 'updatedAt' | 'paidAt'> & { appointmentDateTime: Timestamp, createdAt: Timestamp, updatedAt: Timestamp, paidAt?: Timestamp } = {
       name,
@@ -426,7 +400,6 @@ export async function createAppointmentAction(
       updatedAt: now,
     };
 
-    if (isOnline) {
       appointmentToSave.amount = CONSULTATION_FEE_PAISE;
       appointmentToSave.currency = "INR";
       if (paymentId && orderId && signature) {
@@ -438,13 +411,12 @@ export async function createAppointmentAction(
         appointmentToSave.paidAt = now;
         appointmentToSave.status = "Paid & Scheduled";
       } else {
-        appointmentToSave.paymentStatus = "Pending";
-        appointmentToSave.paymentMethod = "Razorpay";
+         return {
+            message: "Payment details are missing. Appointment could not be scheduled.",
+            errors: { _form: ["Payment details were not received. Please try again or contact support."] },
+            success: false,
+        };
       }
-    } else {
-      appointmentToSave.paymentStatus = "PayAtClinic";
-      appointmentToSave.paymentMethod = "Offline";
-    }
 
     const docRef = await addDoc(collection(db, collectionName), appointmentToSave);
 
