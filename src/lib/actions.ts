@@ -88,7 +88,7 @@ export async function registerUserAction(
       };
     }
     
-    // Generate Registration ID using a transaction
+    // Generate custom Registration ID using a transaction
     const newRegistrationId = await runTransaction(db, async (transaction) => {
         const counterRef = doc(db, "counters", "patientRegistration");
         const counterDoc = await transaction.get(counterRef);
@@ -107,18 +107,18 @@ export async function registerUserAction(
         }
 
         const newDailyCounts = { ...dailyCounts, [dateString]: newSequence };
-        transaction.set(counterRef, { dailyCounts: newDailyCounts });
+        transaction.set(counterRef, { dailyCounts: newDailyCounts }, { merge: true });
 
         const sequenceString = String(newSequence).padStart(4, '0'); // Pad with zeros to make it 4 digits
         return `RUBY${dateString}${sequenceString}`;
     });
 
 
-    const newUserRef = doc(collection(db, "patients"));
-    const newUserId = newUserRef.id;
+    // Use the generated ID as the document ID
+    const newUserRef = doc(db, "patients", newRegistrationId);
     
     const newUser: User = {
-      id: newUserId,
+      id: newRegistrationId,
       registrationId: newRegistrationId,
       name,
       email,
@@ -253,8 +253,34 @@ export async function createAppointmentAction(
       const querySnapshot = await getDocs(q);
 
       if (querySnapshot.empty) {
-        // Create new patient record
-        await addDoc(patientsCollection, {
+        // Create new patient record with a custom ID
+        const newRegistrationId = await runTransaction(db, async (transaction) => {
+            const counterRef = doc(db, "counters", "patientRegistration");
+            const counterDoc = await transaction.get(counterRef);
+
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = String(today.getMonth() + 1).padStart(2, '0');
+            const day = String(today.getDate()).padStart(2, '0');
+            const dateString = `${year}${month}${day}`;
+
+            let newSequence = 1;
+            const dailyCounts = counterDoc.exists() ? counterDoc.data().dailyCounts || {} : {};
+            
+            if (dailyCounts[dateString]) {
+                newSequence = dailyCounts[dateString] + 1;
+            }
+
+            const newDailyCounts = { ...dailyCounts, [dateString]: newSequence };
+            transaction.set(counterRef, { dailyCounts: newDailyCounts }, { merge: true });
+
+            const sequenceString = String(newSequence).padStart(4, '0');
+            return `RUBY${dateString}${sequenceString}`;
+        });
+        
+        const newPatientRef = doc(db, "patients", newRegistrationId);
+        await setDoc(newPatientRef, {
+          registrationId: newRegistrationId,
           name,
           age: age || null,
           contactNumber,
@@ -288,19 +314,19 @@ export async function createAppointmentAction(
   const day = String(preferredDate.getDate()).padStart(2, '0');
   const collectionName = `${year}-${month}-${day}-appointments`;
 
+  // Robustly calculate appointmentDateTimeJS using UTC offsets
+  const appointmentDateMillis = preferredDate.getTime();
   const [timeStr, period] = preferredTime.split(' ');
   const [hoursStr, minutesStr] = timeStr.split(':');
   let hours = parseInt(hoursStr, 10);
   const minutes = parseInt(minutesStr, 10);
-
   if (period.toUpperCase() === 'PM' && hours < 12) {
     hours += 12;
-  } else if (period.toUpperCase() === 'AM' && hours === 12) { 
+  } else if (period.toUpperCase() === 'AM' && hours === 12) {
     hours = 0;
   }
-  
-  const appointmentDateTimeMillis = preferredDate.getTime() + (hours * 60 * 60 * 1000) + (minutes * 60 * 1000);
-  const appointmentDateTimeJS = new Date(appointmentDateTimeMillis);
+  const timeOffsetMillis = (hours * 60 * 60 * 1000) + (minutes * 60 * 1000);
+  const appointmentDateTimeJS = new Date(appointmentDateMillis + timeOffsetMillis);
 
   
   try {
